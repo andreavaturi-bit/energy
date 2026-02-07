@@ -1,218 +1,1141 @@
+import { useState, useRef, useCallback, useMemo } from 'react'
+import { Link } from 'react-router-dom'
 import {
   Upload,
-  FileText,
   FileSpreadsheet,
-  Settings2,
   CheckCircle2,
   XCircle,
   AlertTriangle,
-  Clock,
+  ChevronRight,
+  ChevronLeft,
   ArrowRight,
-  History,
+  Check,
+  X,
+  Loader2,
 } from 'lucide-react'
+import { Badge } from '@/components/ui/Badge'
+import {
+  PRESET_PROFILES,
+  detectProfile,
+  detectDelimiter,
+  processCSVImport,
+  convertToTransactions,
+  parseCSVFile,
+} from '@/lib/csvEngine'
+import type { ImportPreview, ParsedRow } from '@/lib/csvEngine'
+import { CONTAINERS, SUBJECTS, getSubject } from '@/lib/mockData'
+import { formatCurrency, formatDate, cn } from '@/lib/utils'
+import type { ImportProfile } from '@/types'
 
-// Types reference: ImportProfile, ImportBatch from @/types
+// ============================================================
+// TYPES
+// ============================================================
 
-// Placeholder import profiles
-const mockProfiles = [
-  { id: '1', name: 'Intesa Sanpaolo CSV', container: 'Intesa Sanpaolo', fileType: 'csv', delimiter: ';', dateFormat: 'DD/MM/YYYY' },
-  { id: '2', name: 'Unicredit XLSX', container: 'Unicredit', fileType: 'xlsx', delimiter: ',', dateFormat: 'DD/MM/YYYY' },
-  { id: '3', name: 'Amex PDF', container: 'Amex Platino', fileType: 'pdf', delimiter: '—', dateFormat: 'DD/MM/YYYY' },
-  { id: '4', name: 'PayPal CSV', container: 'PayPal', fileType: 'csv', delimiter: ',', dateFormat: 'YYYY-MM-DD' },
-]
+type WizardStep = 1 | 2 | 3 | 4
 
-// Placeholder column mapping preview
-const mockColumnMapping = [
-  { source: 'Data Operazione', target: 'date', sample: '07/02/2026' },
-  { source: 'Data Valuta', target: 'valueDate', sample: '07/02/2026' },
-  { source: 'Descrizione', target: 'description', sample: 'Bonifico SEPA' },
-  { source: 'Importo (EUR)', target: 'amount', sample: '-142,00' },
-  { source: 'Causale', target: 'notes', sample: 'Pagamento bolletta' },
-]
+type ProfileSelection =
+  | { type: 'preset'; index: number }
+  | { type: 'custom' }
 
-// Placeholder import history
-const mockImportHistory = [
-  { id: '1', filename: 'intesa_gen_2026.csv', profile: 'Intesa Sanpaolo CSV', date: '01/02/2026', total: 45, imported: 42, skipped: 2, duplicates: 1, status: 'completed' as const },
-  { id: '2', filename: 'unicredit_gen_2026.xlsx', profile: 'Unicredit XLSX', date: '01/02/2026', total: 38, imported: 38, skipped: 0, duplicates: 0, status: 'completed' as const },
-  { id: '3', filename: 'amex_gen_2026.pdf', profile: 'Amex PDF', date: '31/01/2026', total: 22, imported: 20, skipped: 0, duplicates: 2, status: 'completed' as const },
-  { id: '4', filename: 'paypal_dic_2025.csv', profile: 'PayPal CSV', date: '05/01/2026', total: 15, imported: 0, skipped: 15, duplicates: 0, status: 'failed' as const },
-]
-
-const statusConfig = {
-  completed: { icon: CheckCircle2, color: 'text-emerald-400', label: 'Completato' },
-  failed: { icon: XCircle, color: 'text-red-400', label: 'Fallito' },
-  partial: { icon: AlertTriangle, color: 'text-amber-400', label: 'Parziale' },
-  processing: { icon: Clock, color: 'text-blue-400', label: 'In corso' },
+interface CustomProfile {
+  delimiter: string
+  dateFormat: string
+  decimalSeparator: string
+  thousandsSeparator: string
+  skipRows: number
+  amountInverted: boolean
 }
 
+interface ColumnMapping {
+  date: string
+  description: string
+  amount: string
+  currency: string
+  valueDate: string
+  externalId: string
+  notes: string
+}
+
+interface ImportResultData {
+  imported: number
+  duplicates: number
+  errors: number
+}
+
+// ============================================================
+// CONSTANTS
+// ============================================================
+
+const STEP_LABELS = [
+  { num: 1, label: 'Carica File' },
+  { num: 2, label: 'Profilo' },
+  { num: 3, label: 'Anteprima' },
+  { num: 4, label: 'Risultato' },
+]
+
+const DELIMITER_OPTIONS = [
+  { value: ',', label: 'Virgola (,)' },
+  { value: ';', label: 'Punto e virgola (;)' },
+  { value: '\t', label: 'Tab' },
+]
+
+const DATE_FORMAT_OPTIONS = [
+  { value: 'DD/MM/YYYY', label: 'DD/MM/YYYY' },
+  { value: 'MM/DD/YYYY', label: 'MM/DD/YYYY' },
+  { value: 'YYYY-MM-DD', label: 'YYYY-MM-DD' },
+]
+
+const DECIMAL_OPTIONS = [
+  { value: ',', label: 'Virgola (,)' },
+  { value: '.', label: 'Punto (.)' },
+]
+
+const THOUSANDS_OPTIONS = [
+  { value: '.', label: 'Punto (.)' },
+  { value: ',', label: 'Virgola (,)' },
+  { value: '', label: 'Nessuno' },
+]
+
+const MAPPING_FIELDS: { key: keyof ColumnMapping; label: string; required: boolean }[] = [
+  { key: 'date', label: 'Data', required: true },
+  { key: 'description', label: 'Descrizione', required: true },
+  { key: 'amount', label: 'Importo', required: true },
+  { key: 'currency', label: 'Valuta', required: false },
+  { key: 'valueDate', label: 'Data Valuta', required: false },
+  { key: 'externalId', label: 'ID Esterno', required: false },
+  { key: 'notes', label: 'Note', required: false },
+]
+
+// ============================================================
+// HELPER: group containers by subject
+// ============================================================
+
+function useGroupedContainers() {
+  return useMemo(() => {
+    const groups: { subject: { id: string; name: string }; containers: typeof CONTAINERS }[] = []
+    const subjectMap = new Map<string, typeof CONTAINERS>()
+
+    for (const c of CONTAINERS) {
+      if (!c.isActive) continue
+      const list = subjectMap.get(c.subjectId) || []
+      list.push(c)
+      subjectMap.set(c.subjectId, list)
+    }
+
+    for (const [subjectId, containers] of subjectMap) {
+      const subject = getSubject(subjectId)
+      groups.push({
+        subject: { id: subjectId, name: subject?.name || subjectId },
+        containers: containers.sort((a, b) => a.sortOrder - b.sortOrder),
+      })
+    }
+
+    // Sort groups by subject name
+    const subjectOrder = SUBJECTS.map(s => s.id)
+    groups.sort((a, b) => subjectOrder.indexOf(a.subject.id) - subjectOrder.indexOf(b.subject.id))
+
+    return groups
+  }, [])
+}
+
+// ============================================================
+// STEP INDICATOR
+// ============================================================
+
+function StepIndicator({ currentStep }: { currentStep: WizardStep }) {
+  return (
+    <div className="flex items-center justify-center gap-1">
+      {STEP_LABELS.map(({ num, label }, idx) => {
+        const isActive = num === currentStep
+        const isCompleted = num < currentStep
+        return (
+          <div key={num} className="flex items-center">
+            <div className="flex items-center gap-2">
+              <div
+                className={cn(
+                  'flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold transition-colors',
+                  isActive && 'bg-energy-500 text-zinc-950',
+                  isCompleted && 'bg-energy-500/20 text-energy-400',
+                  !isActive && !isCompleted && 'bg-zinc-800 text-zinc-500',
+                )}
+              >
+                {isCompleted ? <Check className="h-4 w-4" /> : num}
+              </div>
+              <span
+                className={cn(
+                  'text-sm font-medium hidden sm:inline',
+                  isActive && 'text-zinc-100',
+                  isCompleted && 'text-energy-400',
+                  !isActive && !isCompleted && 'text-zinc-500',
+                )}
+              >
+                {label}
+              </span>
+            </div>
+            {idx < STEP_LABELS.length - 1 && (
+              <ChevronRight className="mx-2 h-4 w-4 text-zinc-600" />
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ============================================================
+// FORMAT FILE SIZE
+// ============================================================
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+// ============================================================
+// MAIN COMPONENT
+// ============================================================
+
 export function ImportData() {
+  // --- Wizard state ---
+  const [step, setStep] = useState<WizardStep>(1)
+
+  // --- Step 1 state ---
+  const [file, setFile] = useState<File | null>(null)
+  const [containerId, setContainerId] = useState<string>('')
+  const [isDragging, setIsDragging] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // --- Step 2 state ---
+  const [detectedColumns, setDetectedColumns] = useState<string[]>([])
+  const [profileSelection, setProfileSelection] = useState<ProfileSelection | null>(null)
+  const [autoDetectedProfile, setAutoDetectedProfile] = useState<string | null>(null)
+  const [customProfile, setCustomProfile] = useState<CustomProfile>({
+    delimiter: ';',
+    dateFormat: 'DD/MM/YYYY',
+    decimalSeparator: ',',
+    thousandsSeparator: '.',
+    skipRows: 0,
+    amountInverted: false,
+  })
+  const [columnMapping, setColumnMapping] = useState<ColumnMapping>({
+    date: '',
+    description: '',
+    amount: '',
+    currency: '',
+    valueDate: '',
+    externalId: '',
+    notes: '',
+  })
+
+  // --- Step 3 state ---
+  const [preview, setPreview] = useState<ImportPreview | null>(null)
+  const [isProcessing, setIsProcessing] = useState(false)
+
+  // --- Step 4 state ---
+  const [importResult, setImportResult] = useState<ImportResultData | null>(null)
+
+  // --- Grouped containers ---
+  const groupedContainers = useGroupedContainers()
+
+  // ============================================================
+  // FILE HANDLING
+  // ============================================================
+
+  const handleFile = useCallback((f: File) => {
+    if (!f.name.toLowerCase().endsWith('.csv')) return
+    setFile(f)
+  }, [])
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault()
+      setIsDragging(false)
+      const f = e.dataTransfer.files[0]
+      if (f) handleFile(f)
+    },
+    [handleFile],
+  )
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(true)
+  }, [])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(false)
+  }, [])
+
+  const handleFileInput = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const f = e.target.files?.[0]
+      if (f) handleFile(f)
+    },
+    [handleFile],
+  )
+
+  // ============================================================
+  // STEP TRANSITIONS
+  // ============================================================
+
+  /** Step 1 -> 2: read file header to detect columns */
+  const goToStep2 = useCallback(async () => {
+    if (!file) return
+
+    // Read file text for delimiter detection & column extraction
+    const text = await file.text()
+    const delimiter = detectDelimiter(text)
+
+    const { columns } = await parseCSVFile(file, delimiter, 'UTF-8', 0)
+    setDetectedColumns(columns)
+
+    // Auto-detect profile
+    const detected = detectProfile(columns)
+    if (detected) {
+      setAutoDetectedProfile(detected.name)
+      const idx = PRESET_PROFILES.findIndex(p => p.name === detected.name)
+      setProfileSelection({ type: 'preset', index: idx })
+      // Fill column mapping from detected profile
+      const mapping = detected.columnMapping as Record<string, string>
+      setColumnMapping({
+        date: mapping.date || '',
+        description: mapping.description || '',
+        amount: mapping.amount || '',
+        currency: mapping.currency || '',
+        valueDate: mapping.valueDate || '',
+        externalId: mapping.externalId || '',
+        notes: mapping.notes || '',
+      })
+      // Set custom profile defaults from detected
+      setCustomProfile({
+        delimiter: detected.delimiter,
+        dateFormat: detected.dateFormat,
+        decimalSeparator: detected.decimalSeparator,
+        thousandsSeparator: detected.thousandsSeparator,
+        skipRows: detected.skipRows,
+        amountInverted: detected.amountInverted,
+      })
+    } else {
+      setAutoDetectedProfile(null)
+      setProfileSelection(null)
+      setColumnMapping({
+        date: '',
+        description: '',
+        amount: '',
+        currency: '',
+        valueDate: '',
+        externalId: '',
+        notes: '',
+      })
+      setCustomProfile({
+        delimiter,
+        dateFormat: 'DD/MM/YYYY',
+        decimalSeparator: ',',
+        thousandsSeparator: '.',
+        skipRows: 0,
+        amountInverted: false,
+      })
+    }
+
+    setStep(2)
+  }, [file])
+
+  /** Select a preset profile and fill column mapping */
+  const selectPresetProfile = useCallback(
+    (index: number) => {
+      setProfileSelection({ type: 'preset', index })
+      const profile = PRESET_PROFILES[index]
+      const mapping = profile.columnMapping as Record<string, string>
+      setColumnMapping({
+        date: mapping.date || '',
+        description: mapping.description || '',
+        amount: mapping.amount || '',
+        currency: mapping.currency || '',
+        valueDate: mapping.valueDate || '',
+        externalId: mapping.externalId || '',
+        notes: mapping.notes || '',
+      })
+      setCustomProfile({
+        delimiter: profile.delimiter,
+        dateFormat: profile.dateFormat,
+        decimalSeparator: profile.decimalSeparator,
+        thousandsSeparator: profile.thousandsSeparator,
+        skipRows: profile.skipRows,
+        amountInverted: profile.amountInverted,
+      })
+    },
+    [],
+  )
+
+  /** Build the effective ImportProfile from current selection */
+  const buildEffectiveProfile = useCallback((): Omit<ImportProfile, 'id' | 'containerId' | 'createdAt' | 'updatedAt'> => {
+    const base =
+      profileSelection?.type === 'preset'
+        ? PRESET_PROFILES[profileSelection.index]
+        : null
+
+    const src = profileSelection?.type === 'custom' ? customProfile : (base ?? customProfile)
+
+    return {
+      name: base?.name || 'Personalizzato',
+      fileType: 'csv',
+      delimiter: src.delimiter,
+      dateFormat: src.dateFormat,
+      decimalSeparator: src.decimalSeparator,
+      thousandsSeparator: src.thousandsSeparator,
+      encoding: 'UTF-8',
+      skipRows: src.skipRows,
+      columnMapping: {
+        date: columnMapping.date,
+        description: columnMapping.description,
+        amount: columnMapping.amount,
+        ...(columnMapping.currency ? { currency: columnMapping.currency } : {}),
+        ...(columnMapping.valueDate ? { valueDate: columnMapping.valueDate } : {}),
+        ...(columnMapping.externalId ? { externalId: columnMapping.externalId } : {}),
+        ...(columnMapping.notes ? { notes: columnMapping.notes } : {}),
+      },
+      amountInverted: src.amountInverted,
+      separateAmountColumns: false,
+      dedupColumns: [columnMapping.date, columnMapping.description, columnMapping.amount].filter(Boolean),
+    }
+  }, [profileSelection, customProfile, columnMapping])
+
+  /** Step 2 -> 3: process import */
+  const goToStep3 = useCallback(async () => {
+    if (!file) return
+    setIsProcessing(true)
+    try {
+      const profile = buildEffectiveProfile()
+      const result = await processCSVImport(file, profile)
+      setPreview(result)
+      setStep(3)
+    } catch (err) {
+      console.error('Import processing failed:', err)
+    } finally {
+      setIsProcessing(false)
+    }
+  }, [file, buildEffectiveProfile])
+
+  /** Step 3 -> 4: perform import (mock) */
+  const performImport = useCallback(() => {
+    if (!preview) return
+
+    // In a real app, we'd call convertToTransactions and save to DB
+    const readyRows = preview.parsedRows.filter(r => r.status === 'ready')
+    const _transactions = convertToTransactions(readyRows, containerId, 'csv_import')
+
+    setImportResult({
+      imported: preview.readyCount,
+      duplicates: preview.duplicateCount,
+      errors: preview.errorCount,
+    })
+    setStep(4)
+  }, [preview, containerId])
+
+  /** Reset wizard */
+  const resetWizard = useCallback(() => {
+    setStep(1)
+    setFile(null)
+    setContainerId('')
+    setDetectedColumns([])
+    setProfileSelection(null)
+    setAutoDetectedProfile(null)
+    setPreview(null)
+    setImportResult(null)
+    setColumnMapping({
+      date: '',
+      description: '',
+      amount: '',
+      currency: '',
+      valueDate: '',
+      externalId: '',
+      notes: '',
+    })
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }, [])
+
+  // ============================================================
+  // VALIDATION
+  // ============================================================
+
+  const step1Valid = file !== null && containerId !== ''
+  const step2Valid =
+    profileSelection !== null &&
+    columnMapping.date !== '' &&
+    columnMapping.description !== '' &&
+    columnMapping.amount !== ''
+
+  // ============================================================
+  // RENDER
+  // ============================================================
+
   return (
     <div className="space-y-6">
       {/* Page header */}
       <div>
         <h1 className="text-2xl font-bold text-zinc-100">Importa Dati</h1>
         <p className="mt-1 text-sm text-zinc-400">
-          Importa transazioni da file CSV, XLSX o PDF dei tuoi estratti conto
+          Importa transazioni da file CSV nel contenitore selezionato
         </p>
       </div>
 
-      {/* Upload area + Profile selector */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* File upload */}
-        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-          <h2 className="text-lg font-semibold text-zinc-100 mb-4">Carica File</h2>
-          <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-zinc-700 bg-zinc-800/30 px-6 py-12 text-center hover:border-energy-500/50 hover:bg-zinc-800/50 transition-colors cursor-pointer">
-            <Upload className="h-10 w-10 text-zinc-500 mb-3" />
-            <p className="text-sm font-medium text-zinc-300">
-              Trascina il file qui o clicca per selezionare
-            </p>
-            <p className="mt-1 text-xs text-zinc-500">
-              Formati supportati: CSV, XLSX, PDF (max 10MB)
-            </p>
-            <div className="mt-4 flex items-center gap-3">
-              <span className="flex items-center gap-1 rounded-full bg-zinc-800 px-3 py-1 text-xs text-zinc-400">
-                <FileSpreadsheet className="h-3 w-3" /> CSV
-              </span>
-              <span className="flex items-center gap-1 rounded-full bg-zinc-800 px-3 py-1 text-xs text-zinc-400">
-                <FileSpreadsheet className="h-3 w-3" /> XLSX
-              </span>
-              <span className="flex items-center gap-1 rounded-full bg-zinc-800 px-3 py-1 text-xs text-zinc-400">
-                <FileText className="h-3 w-3" /> PDF
-              </span>
+      {/* Step indicator */}
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900 px-6 py-4">
+        <StepIndicator currentStep={step} />
+      </div>
+
+      {/* ============================== STEP 1 ============================== */}
+      {step === 1 && (
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          {/* File upload */}
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-6">
+            <h2 className="mb-4 text-lg font-semibold text-zinc-100">Carica File CSV</h2>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv"
+              className="hidden"
+              onChange={handleFileInput}
+            />
+
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              onDrop={handleDrop}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              className={cn(
+                'flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-16 text-center transition-colors',
+                isDragging
+                  ? 'border-energy-500 bg-energy-500/5'
+                  : file
+                    ? 'border-energy-500/50 bg-energy-500/5'
+                    : 'border-zinc-700 bg-zinc-800/30 hover:border-zinc-600 hover:bg-zinc-800/50',
+              )}
+            >
+              {file ? (
+                <>
+                  <FileSpreadsheet className="mb-3 h-10 w-10 text-energy-400" />
+                  <p className="text-sm font-medium text-zinc-200">{file.name}</p>
+                  <p className="mt-1 text-xs text-zinc-400">{formatFileSize(file.size)}</p>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setFile(null)
+                      if (fileInputRef.current) fileInputRef.current.value = ''
+                    }}
+                    className="mt-3 text-xs text-zinc-500 underline hover:text-zinc-300"
+                  >
+                    Rimuovi file
+                  </button>
+                </>
+              ) : (
+                <>
+                  <Upload className="mb-3 h-10 w-10 text-zinc-500" />
+                  <p className="text-sm font-medium text-zinc-300">
+                    Trascina il file qui o clicca per selezionare
+                  </p>
+                  <p className="mt-1 text-xs text-zinc-500">Formato supportato: CSV</p>
+                </>
+              )}
             </div>
           </div>
-        </div>
 
-        {/* Profile selector */}
-        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-zinc-100">Profilo di Import</h2>
-            <button className="flex items-center gap-1 text-xs text-energy-400 hover:text-energy-300">
-              <Settings2 className="h-3 w-3" />
-              Gestisci profili
+          {/* Container selector */}
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-6">
+            <h2 className="mb-4 text-lg font-semibold text-zinc-100">
+              Seleziona Contenitore
+            </h2>
+            <p className="mb-3 text-xs text-zinc-500">
+              Le transazioni importate verranno associate a questo contenitore
+            </p>
+            <select
+              value={containerId}
+              onChange={(e) => setContainerId(e.target.value)}
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-3 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500 [color-scheme:dark]"
+            >
+              <option value="">-- Seleziona un contenitore --</option>
+              {groupedContainers.map((group) => (
+                <optgroup key={group.subject.id} label={group.subject.name}>
+                  {group.containers.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.currency})
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+
+            {containerId && (
+              <div className="mt-4 rounded-lg border border-zinc-700/50 bg-zinc-800/50 p-3">
+                {(() => {
+                  const container = CONTAINERS.find(c => c.id === containerId)
+                  if (!container) return null
+                  const subject = getSubject(container.subjectId)
+                  return (
+                    <div className="flex items-center gap-3">
+                      <div
+                        className="flex h-9 w-9 items-center justify-center rounded-lg"
+                        style={{ backgroundColor: `${container.color}20` }}
+                      >
+                        <FileSpreadsheet className="h-4 w-4" style={{ color: container.color || '#888' }} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-zinc-200">{container.name}</p>
+                        <p className="text-xs text-zinc-500">
+                          {subject?.name} &middot; {container.provider || container.type} &middot; {container.currency}
+                        </p>
+                      </div>
+                    </div>
+                  )
+                })()}
+              </div>
+            )}
+          </div>
+
+          {/* Navigation */}
+          <div className="col-span-full flex justify-end">
+            <button
+              disabled={!step1Valid}
+              onClick={goToStep2}
+              className={cn(
+                'flex items-center gap-2 rounded-lg px-6 py-2.5 text-sm font-medium transition-colors',
+                step1Valid
+                  ? 'bg-energy-500 text-zinc-950 hover:bg-energy-400'
+                  : 'cursor-not-allowed bg-zinc-800 text-zinc-600',
+              )}
+            >
+              Avanti
+              <ChevronRight className="h-4 w-4" />
             </button>
           </div>
-          <div className="space-y-2">
-            {mockProfiles.map((profile) => (
+        </div>
+      )}
+
+      {/* ============================== STEP 2 ============================== */}
+      {step === 2 && (
+        <div className="space-y-6">
+          {/* Detected columns */}
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-6">
+            <h2 className="mb-3 text-lg font-semibold text-zinc-100">Colonne Rilevate</h2>
+            <div className="flex flex-wrap gap-2">
+              {detectedColumns.map((col) => (
+                <Badge key={col} variant="outline" size="md">
+                  {col}
+                </Badge>
+              ))}
+            </div>
+          </div>
+
+          {/* Auto-detect message */}
+          <div
+            className={cn(
+              'rounded-xl border px-6 py-4',
+              autoDetectedProfile
+                ? 'border-energy-500/30 bg-energy-500/5'
+                : 'border-amber-500/30 bg-amber-500/5',
+            )}
+          >
+            {autoDetectedProfile ? (
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="h-5 w-5 text-energy-400" />
+                <p className="text-sm text-zinc-200">
+                  Profilo rilevato automaticamente:{' '}
+                  <span className="font-semibold text-energy-400">{autoDetectedProfile}</span>
+                </p>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-amber-400" />
+                <p className="text-sm text-zinc-200">
+                  Nessun profilo rilevato automaticamente. Seleziona un profilo manualmente.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Profile list */}
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-6">
+            <h2 className="mb-4 text-lg font-semibold text-zinc-100">Profilo di Importazione</h2>
+            <div className="space-y-2">
+              {PRESET_PROFILES.map((profile, idx) => {
+                const isSelected =
+                  profileSelection?.type === 'preset' && profileSelection.index === idx
+                return (
+                  <button
+                    key={profile.name}
+                    onClick={() => selectPresetProfile(idx)}
+                    className={cn(
+                      'flex w-full items-center justify-between rounded-lg border px-4 py-3 text-left transition-colors',
+                      isSelected
+                        ? 'border-energy-500 bg-energy-500/10'
+                        : 'border-zinc-700 bg-zinc-800 hover:border-zinc-600',
+                    )}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={cn(
+                          'flex h-5 w-5 items-center justify-center rounded-full border-2',
+                          isSelected
+                            ? 'border-energy-500 bg-energy-500'
+                            : 'border-zinc-600 bg-transparent',
+                        )}
+                      >
+                        {isSelected && <Check className="h-3 w-3 text-zinc-950" />}
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-zinc-200">{profile.name}</p>
+                        <p className="text-xs text-zinc-500">
+                          Delimitatore: <span className="text-zinc-400">{profile.delimiter === '\t' ? 'Tab' : `"${profile.delimiter}"`}</span>
+                          {' '}&middot; Data: <span className="text-zinc-400">{profile.dateFormat}</span>
+                          {' '}&middot; Decimale: <span className="text-zinc-400">{profile.decimalSeparator}</span>
+                        </p>
+                      </div>
+                    </div>
+                    {isSelected && <Badge variant="success" size="sm">Selezionato</Badge>}
+                  </button>
+                )
+              })}
+
+              {/* Custom profile option */}
               <button
-                key={profile.id}
-                className="flex w-full items-center justify-between rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-3 text-left hover:border-zinc-600 transition-colors"
+                onClick={() => setProfileSelection({ type: 'custom' })}
+                className={cn(
+                  'flex w-full items-center justify-between rounded-lg border px-4 py-3 text-left transition-colors',
+                  profileSelection?.type === 'custom'
+                    ? 'border-energy-500 bg-energy-500/10'
+                    : 'border-zinc-700 bg-zinc-800 hover:border-zinc-600',
+                )}
               >
                 <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-700">
-                    {profile.fileType === 'pdf' ? (
-                      <FileText className="h-4 w-4 text-zinc-400" />
-                    ) : (
-                      <FileSpreadsheet className="h-4 w-4 text-zinc-400" />
+                  <div
+                    className={cn(
+                      'flex h-5 w-5 items-center justify-center rounded-full border-2',
+                      profileSelection?.type === 'custom'
+                        ? 'border-energy-500 bg-energy-500'
+                        : 'border-zinc-600 bg-transparent',
+                    )}
+                  >
+                    {profileSelection?.type === 'custom' && (
+                      <Check className="h-3 w-3 text-zinc-950" />
                     )}
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-zinc-200">{profile.name}</p>
-                    <p className="text-xs text-zinc-500">
-                      {profile.container} | {profile.fileType.toUpperCase()} | {profile.dateFormat}
-                    </p>
+                    <p className="text-sm font-medium text-zinc-200">Personalizzato</p>
+                    <p className="text-xs text-zinc-500">Configura manualmente tutti i parametri</p>
                   </div>
                 </div>
-                <ArrowRight className="h-4 w-4 text-zinc-500" />
+                {profileSelection?.type === 'custom' && (
+                  <Badge variant="success" size="sm">Selezionato</Badge>
+                )}
               </button>
-            ))}
+            </div>
+          </div>
+
+          {/* Custom profile settings */}
+          {profileSelection?.type === 'custom' && (
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-6">
+              <h2 className="mb-4 text-lg font-semibold text-zinc-100">Impostazioni Personalizzate</h2>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {/* Delimiter */}
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-400">Delimitatore</label>
+                  <select
+                    value={customProfile.delimiter}
+                    onChange={(e) =>
+                      setCustomProfile((p) => ({ ...p, delimiter: e.target.value }))
+                    }
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none [color-scheme:dark]"
+                  >
+                    {DELIMITER_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Date format */}
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-400">Formato Data</label>
+                  <select
+                    value={customProfile.dateFormat}
+                    onChange={(e) =>
+                      setCustomProfile((p) => ({ ...p, dateFormat: e.target.value }))
+                    }
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none [color-scheme:dark]"
+                  >
+                    {DATE_FORMAT_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Decimal separator */}
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-400">
+                    Separatore Decimale
+                  </label>
+                  <select
+                    value={customProfile.decimalSeparator}
+                    onChange={(e) =>
+                      setCustomProfile((p) => ({ ...p, decimalSeparator: e.target.value }))
+                    }
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none [color-scheme:dark]"
+                  >
+                    {DECIMAL_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Thousands separator */}
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-400">
+                    Separatore Migliaia
+                  </label>
+                  <select
+                    value={customProfile.thousandsSeparator}
+                    onChange={(e) =>
+                      setCustomProfile((p) => ({ ...p, thousandsSeparator: e.target.value }))
+                    }
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none [color-scheme:dark]"
+                  >
+                    {THOUSANDS_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Skip rows */}
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-400">
+                    Righe da Saltare
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={customProfile.skipRows}
+                    onChange={(e) =>
+                      setCustomProfile((p) => ({
+                        ...p,
+                        skipRows: Math.max(0, parseInt(e.target.value) || 0),
+                      }))
+                    }
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none [color-scheme:dark]"
+                  />
+                </div>
+
+                {/* Amount inverted */}
+                <div className="flex items-end">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={customProfile.amountInverted}
+                      onChange={(e) =>
+                        setCustomProfile((p) => ({ ...p, amountInverted: e.target.checked }))
+                      }
+                      className="h-4 w-4 rounded border-zinc-600 bg-zinc-800 text-energy-500 focus:ring-energy-500"
+                    />
+                    <span className="text-sm text-zinc-300">Importo invertito</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Column mapping */}
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-6">
+            <h2 className="mb-4 text-lg font-semibold text-zinc-100">Mappatura Colonne</h2>
+            <p className="mb-4 text-xs text-zinc-500">
+              Associa le colonne del CSV ai campi del sistema. I campi con * sono obbligatori.
+            </p>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {MAPPING_FIELDS.map(({ key, label, required }) => (
+                <div key={key}>
+                  <label className="mb-1 block text-xs font-medium text-zinc-400">
+                    {label}
+                    {required && <span className="text-red-400"> *</span>}
+                  </label>
+                  <select
+                    value={columnMapping[key]}
+                    onChange={(e) =>
+                      setColumnMapping((m) => ({ ...m, [key]: e.target.value }))
+                    }
+                    className={cn(
+                      'w-full rounded-lg border bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none [color-scheme:dark]',
+                      required && !columnMapping[key]
+                        ? 'border-red-500/50'
+                        : 'border-zinc-700',
+                    )}
+                  >
+                    <option value="">-- Non mappato --</option>
+                    {detectedColumns.map((col) => (
+                      <option key={col} value={col}>
+                        {col}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Navigation */}
+          <div className="flex justify-between">
+            <button
+              onClick={() => setStep(1)}
+              className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800 px-6 py-2.5 text-sm text-zinc-300 hover:border-zinc-600 transition-colors"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Indietro
+            </button>
+            <button
+              disabled={!step2Valid || isProcessing}
+              onClick={goToStep3}
+              className={cn(
+                'flex items-center gap-2 rounded-lg px-6 py-2.5 text-sm font-medium transition-colors',
+                step2Valid && !isProcessing
+                  ? 'bg-energy-500 text-zinc-950 hover:bg-energy-400'
+                  : 'cursor-not-allowed bg-zinc-800 text-zinc-600',
+              )}
+            >
+              {isProcessing ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Elaborazione...
+                </>
+              ) : (
+                <>
+                  Avanti
+                  <ChevronRight className="h-4 w-4" />
+                </>
+              )}
+            </button>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* Column mapping preview */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-        <div className="px-6 py-4 border-b border-zinc-800">
-          <h2 className="text-lg font-semibold text-zinc-100">Anteprima Mappatura Colonne</h2>
-          <p className="text-xs text-zinc-500 mt-1">
-            Verifica la corrispondenza tra le colonne del file e i campi del sistema
-          </p>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-zinc-800 text-left">
-                <th className="px-6 py-3 font-medium text-zinc-400">Colonna Sorgente</th>
-                <th className="px-6 py-3 font-medium text-zinc-400 text-center">
-                  <ArrowRight className="inline h-4 w-4" />
-                </th>
-                <th className="px-6 py-3 font-medium text-zinc-400">Campo Destinazione</th>
-                <th className="px-6 py-3 font-medium text-zinc-400">Esempio</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-800/50">
-              {mockColumnMapping.map((col) => (
-                <tr key={col.source} className="hover:bg-zinc-800/30 transition-colors">
-                  <td className="px-6 py-3 text-zinc-300 font-mono text-xs">{col.source}</td>
-                  <td className="px-6 py-3 text-center">
-                    <ArrowRight className="inline h-3 w-3 text-zinc-600" />
-                  </td>
-                  <td className="px-6 py-3">
-                    <span className="rounded-md bg-energy-500/10 px-2 py-1 text-xs font-medium text-energy-400">
-                      {col.target}
-                    </span>
-                  </td>
-                  <td className="px-6 py-3 text-zinc-500 font-mono text-xs">{col.sample}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="flex items-center justify-end gap-3 border-t border-zinc-800 px-6 py-4">
-          <button className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:border-zinc-600">
-            Annulla
-          </button>
-          <button className="rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors">
-            Avvia Importazione
-          </button>
-        </div>
-      </div>
+      {/* ============================== STEP 3 ============================== */}
+      {step === 3 && preview && (
+        <div className="space-y-6">
+          {/* Summary cards */}
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <SummaryCard
+              label="Totale righe"
+              value={preview.totalRows}
+              color="text-zinc-100"
+              bg="bg-zinc-800"
+            />
+            <SummaryCard
+              label="Pronte"
+              value={preview.readyCount}
+              color="text-green-400"
+              bg="bg-green-500/10"
+            />
+            <SummaryCard
+              label="Duplicati"
+              value={preview.duplicateCount}
+              color="text-amber-400"
+              bg="bg-amber-500/10"
+            />
+            <SummaryCard
+              label="Errori"
+              value={preview.errorCount}
+              color="text-red-400"
+              bg="bg-red-500/10"
+            />
+          </div>
 
-      {/* Import history */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-        <div className="flex items-center gap-2 px-6 py-4 border-b border-zinc-800">
-          <History className="h-5 w-5 text-zinc-400" />
-          <h2 className="text-lg font-semibold text-zinc-100">Cronologia Import</h2>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-zinc-800 text-left">
-                <th className="px-6 py-3 font-medium text-zinc-400">File</th>
-                <th className="px-6 py-3 font-medium text-zinc-400">Profilo</th>
-                <th className="px-6 py-3 font-medium text-zinc-400">Data</th>
-                <th className="px-6 py-3 font-medium text-zinc-400 text-center">Totali</th>
-                <th className="px-6 py-3 font-medium text-zinc-400 text-center">Importate</th>
-                <th className="px-6 py-3 font-medium text-zinc-400 text-center">Saltate</th>
-                <th className="px-6 py-3 font-medium text-zinc-400 text-center">Duplicati</th>
-                <th className="px-6 py-3 font-medium text-zinc-400">Stato</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-800/50">
-              {mockImportHistory.map((batch) => {
-                const StatusIcon = statusConfig[batch.status].icon
-                return (
-                  <tr key={batch.id} className="hover:bg-zinc-800/30 transition-colors">
-                    <td className="px-6 py-3 text-zinc-200 font-mono text-xs">{batch.filename}</td>
-                    <td className="px-6 py-3 text-zinc-400">{batch.profile}</td>
-                    <td className="px-6 py-3 text-zinc-400">{batch.date}</td>
-                    <td className="px-6 py-3 text-zinc-300 text-center">{batch.total}</td>
-                    <td className="px-6 py-3 text-emerald-400 text-center">{batch.imported}</td>
-                    <td className="px-6 py-3 text-amber-400 text-center">{batch.skipped}</td>
-                    <td className="px-6 py-3 text-zinc-500 text-center">{batch.duplicates}</td>
-                    <td className="px-6 py-3">
-                      <span className={`inline-flex items-center gap-1 ${statusConfig[batch.status].color}`}>
-                        <StatusIcon className="h-3.5 w-3.5" />
-                        <span className="text-xs">{statusConfig[batch.status].label}</span>
-                      </span>
-                    </td>
+          {/* Preview table */}
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900 overflow-hidden">
+            <div className="px-6 py-4 border-b border-zinc-800">
+              <h2 className="text-lg font-semibold text-zinc-100">Anteprima Transazioni</h2>
+              <p className="mt-1 text-xs text-zinc-500">
+                {preview.totalRows} righe analizzate dal file {preview.filename}
+              </p>
+            </div>
+            <div className="max-h-[28rem] overflow-y-auto overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 z-10 bg-zinc-900">
+                  <tr className="border-b border-zinc-800 text-left">
+                    <th className="px-4 py-3 font-medium text-zinc-400 w-16">#</th>
+                    <th className="px-4 py-3 font-medium text-zinc-400 w-24">Stato</th>
+                    <th className="px-4 py-3 font-medium text-zinc-400 w-28">Data</th>
+                    <th className="px-4 py-3 font-medium text-zinc-400">Descrizione</th>
+                    <th className="px-4 py-3 font-medium text-zinc-400 text-right w-32">Importo</th>
+                    <th className="px-4 py-3 font-medium text-zinc-400 w-16">Valuta</th>
+                    <th className="px-4 py-3 font-medium text-zinc-400">Errore</th>
                   </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                </thead>
+                <tbody className="divide-y divide-zinc-800/50">
+                  {preview.parsedRows.map((row) => (
+                    <PreviewRow key={row.rowIndex} row={row} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Navigation */}
+          <div className="flex justify-between">
+            <button
+              onClick={() => setStep(2)}
+              className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800 px-6 py-2.5 text-sm text-zinc-300 hover:border-zinc-600 transition-colors"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Indietro
+            </button>
+            <button
+              disabled={preview.readyCount === 0}
+              onClick={performImport}
+              className={cn(
+                'flex items-center gap-2 rounded-lg px-6 py-2.5 text-sm font-medium transition-colors',
+                preview.readyCount > 0
+                  ? 'bg-energy-500 text-zinc-950 hover:bg-energy-400'
+                  : 'cursor-not-allowed bg-zinc-800 text-zinc-600',
+              )}
+            >
+              Importa {preview.readyCount} transazioni
+              <ArrowRight className="h-4 w-4" />
+            </button>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* ============================== STEP 4 ============================== */}
+      {step === 4 && importResult && (
+        <div className="flex flex-col items-center justify-center rounded-xl border border-zinc-800 bg-zinc-900 px-6 py-16">
+          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-energy-500/15">
+            <CheckCircle2 className="h-8 w-8 text-energy-400" />
+          </div>
+          <h2 className="mt-4 text-xl font-bold text-zinc-100">Importazione Completata</h2>
+          <p className="mt-2 text-sm text-zinc-400">
+            Le transazioni sono state importate con successo nel contenitore selezionato.
+          </p>
+
+          {/* Result summary */}
+          <div className="mt-8 flex gap-6">
+            <div className="text-center">
+              <p className="text-2xl font-bold text-green-400">{importResult.imported}</p>
+              <p className="text-xs text-zinc-500">Importate</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-bold text-amber-400">{importResult.duplicates}</p>
+              <p className="text-xs text-zinc-500">Duplicati saltati</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-bold text-red-400">{importResult.errors}</p>
+              <p className="text-xs text-zinc-500">Errori</p>
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="mt-8 flex gap-4">
+            <button
+              onClick={resetWizard}
+              className="rounded-lg border border-zinc-700 bg-zinc-800 px-6 py-2.5 text-sm text-zinc-300 hover:border-zinc-600 transition-colors"
+            >
+              Importa un altro file
+            </button>
+            <Link
+              to="/transactions"
+              className="inline-flex items-center gap-2 rounded-lg bg-energy-500 px-6 py-2.5 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors"
+            >
+              Vai alle Transazioni
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
+        </div>
+      )}
     </div>
+  )
+}
+
+// ============================================================
+// SUB-COMPONENTS
+// ============================================================
+
+function SummaryCard({
+  label,
+  value,
+  color,
+  bg,
+}: {
+  label: string
+  value: number
+  color: string
+  bg: string
+}) {
+  return (
+    <div className={cn('rounded-xl border border-zinc-800 p-5', bg)}>
+      <p className="text-xs font-medium text-zinc-400">{label}</p>
+      <p className={cn('mt-1 text-2xl font-bold', color)}>{value}</p>
+    </div>
+  )
+}
+
+function PreviewRow({ row }: { row: ParsedRow }) {
+  const rowBg =
+    row.status === 'ready'
+      ? 'bg-green-500/[0.03]'
+      : row.status === 'duplicate'
+        ? 'bg-amber-500/[0.03]'
+        : row.status === 'error'
+          ? 'bg-red-500/[0.03]'
+          : ''
+
+  const statusBadge =
+    row.status === 'ready' ? (
+      <Badge variant="success" size="sm">
+        <CheckCircle2 className="mr-1 h-3 w-3" />
+        OK
+      </Badge>
+    ) : row.status === 'duplicate' ? (
+      <Badge variant="warning" size="sm">
+        DUP
+      </Badge>
+    ) : (
+      <Badge variant="danger" size="sm">
+        <X className="mr-1 h-3 w-3" />
+        ERR
+      </Badge>
+    )
+
+  const amountNum = row.mapped.amount
+  const amountColor = amountNum >= 0 ? 'text-green-400' : 'text-red-400'
+
+  let formattedDate = row.mapped.date
+  try {
+    if (row.mapped.date && row.mapped.date !== '1970-01-01') {
+      formattedDate = formatDate(row.mapped.date)
+    }
+  } catch {
+    // keep raw
+  }
+
+  return (
+    <tr className={cn('transition-colors hover:bg-zinc-800/40', rowBg)}>
+      <td className="px-4 py-2.5 text-zinc-500 font-mono text-xs">{row.rowIndex + 1}</td>
+      <td className="px-4 py-2.5">{statusBadge}</td>
+      <td className="px-4 py-2.5 text-zinc-300 text-xs">{formattedDate}</td>
+      <td className="px-4 py-2.5 text-zinc-200 text-xs max-w-xs truncate">
+        {row.mapped.description}
+      </td>
+      <td className={cn('px-4 py-2.5 text-right font-mono text-xs font-medium', amountColor)}>
+        {formatCurrency(amountNum, row.mapped.currency)}
+      </td>
+      <td className="px-4 py-2.5 text-zinc-500 text-xs">{row.mapped.currency}</td>
+      <td className="px-4 py-2.5 text-red-400 text-xs max-w-xs truncate">
+        {row.error || ''}
+      </td>
+    </tr>
   )
 }
