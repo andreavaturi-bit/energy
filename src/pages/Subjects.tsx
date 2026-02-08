@@ -1,3 +1,4 @@
+import { useState, useMemo } from 'react'
 import {
   Plus,
   User,
@@ -6,244 +7,614 @@ import {
   LayoutGrid,
   List,
   MoreHorizontal,
+  Pencil,
+  Trash2,
+  X,
+  MapPin,
+  Wallet,
+  Users,
+  ChevronRight,
+  Eye,
+  EyeOff,
+  Globe,
 } from 'lucide-react'
-
-// Types reference: Subject, SubjectType, SubjectRole from @/types
-
-// Placeholder subjects
-const mockSubjects = [
-  {
-    id: '1',
-    type: 'person' as const,
-    name: 'Andrea V.',
-    role: 'Titolare',
-    taxId: 'VRDNDR85...',
-    country: 'IT',
-    containers: 5,
-    isActive: true,
-    notes: 'Soggetto principale',
-  },
-  {
-    id: '2',
-    type: 'person' as const,
-    name: 'Laura M.',
-    role: 'Familiare',
-    taxId: null,
-    country: 'IT',
-    containers: 2,
-    isActive: true,
-    notes: 'Partner',
-  },
-  {
-    id: '3',
-    type: 'company' as const,
-    name: 'Kairos SRLS',
-    role: 'Titolare',
-    taxId: '12345678901',
-    country: 'IT',
-    containers: 1,
-    isActive: true,
-    notes: 'Societa\' di consulenza',
-  },
-  {
-    id: '4',
-    type: 'company' as const,
-    name: 'Shuffle SSRL',
-    role: 'Partner',
-    taxId: '98765432101',
-    country: 'IT',
-    containers: 1,
-    isActive: true,
-    notes: 'Ghiaccio Spettacolo',
-  },
-  {
-    id: '5',
-    type: 'company' as const,
-    name: 'LTD UK',
-    role: 'Titolare',
-    taxId: null,
-    country: 'GB',
-    containers: 1,
-    isActive: true,
-    notes: 'Societa\' UK',
-  },
-  {
-    id: '6',
-    type: 'person' as const,
-    name: 'Mirko T.',
-    role: 'Partner',
-    taxId: null,
-    country: 'IT',
-    containers: 0,
-    isActive: true,
-    notes: 'VS/Opzionetika',
-  },
-]
+import { SUBJECTS, CONTAINERS, getContainersBySubject } from '@/lib/mockData'
+import type { Subject, SubjectType, SubjectRole } from '@/types'
 
 const roleColors: Record<string, string> = {
-  Titolare: 'bg-energy-500/10 text-energy-400',
-  Familiare: 'bg-blue-500/10 text-blue-400',
-  Partner: 'bg-purple-500/10 text-purple-400',
-  Altro: 'bg-zinc-500/10 text-zinc-400',
+  owner: 'bg-energy-500/10 text-energy-400',
+  family: 'bg-blue-500/10 text-blue-400',
+  partner: 'bg-purple-500/10 text-purple-400',
+  other: 'bg-zinc-500/10 text-zinc-400',
+}
+
+const roleLabels: Record<string, string> = {
+  owner: 'Titolare',
+  family: 'Familiare',
+  partner: 'Partner',
+  other: 'Altro',
+}
+
+const countryFlags: Record<string, string> = {
+  IT: '🇮🇹',
+  GB: '🇬🇧',
+  RO: '🇷🇴',
+  US: '🇺🇸',
+}
+
+type ViewMode = 'grid' | 'list'
+
+interface SubjectFormData {
+  type: SubjectType
+  name: string
+  legalForm: string
+  country: string
+  role: SubjectRole
+  parentSubjectId: string
+  notes: string
+}
+
+const emptyForm: SubjectFormData = {
+  type: 'person',
+  name: '',
+  legalForm: '',
+  country: 'IT',
+  role: 'owner',
+  parentSubjectId: '',
+  notes: '',
 }
 
 export function Subjects() {
+  const [subjects, setSubjects] = useState<Subject[]>([...SUBJECTS])
+  const [search, setSearch] = useState('')
+  const [viewMode, setViewMode] = useState<ViewMode>('grid')
+  const [showInactive, setShowInactive] = useState(false)
+  const [showModal, setShowModal] = useState(false)
+  const [editingSubject, setEditingSubject] = useState<Subject | null>(null)
+  const [form, setForm] = useState<SubjectFormData>(emptyForm)
+  const [menuOpen, setMenuOpen] = useState<string | null>(null)
+
+  const filtered = useMemo(() => {
+    return subjects.filter((s) => {
+      if (!showInactive && !s.isActive) return false
+      if (search) {
+        const q = search.toLowerCase()
+        return (
+          s.name.toLowerCase().includes(q) ||
+          (s.notes && s.notes.toLowerCase().includes(q)) ||
+          (s.legalForm && s.legalForm.toLowerCase().includes(q))
+        )
+      }
+      return true
+    })
+  }, [subjects, search, showInactive])
+
+  const persons = filtered.filter((s) => s.type === 'person')
+  const companies = filtered.filter((s) => s.type === 'company')
+
+  function openCreate() {
+    setEditingSubject(null)
+    setForm(emptyForm)
+    setShowModal(true)
+  }
+
+  function openEdit(subject: Subject) {
+    setEditingSubject(subject)
+    setForm({
+      type: subject.type,
+      name: subject.name,
+      legalForm: subject.legalForm || '',
+      country: subject.country,
+      role: (subject.role as SubjectRole) || 'other',
+      parentSubjectId: subject.parentSubjectId || '',
+      notes: subject.notes || '',
+    })
+    setShowModal(true)
+    setMenuOpen(null)
+  }
+
+  function handleSave() {
+    if (!form.name.trim()) return
+
+    if (editingSubject) {
+      setSubjects((prev) =>
+        prev.map((s) =>
+          s.id === editingSubject.id
+            ? {
+                ...s,
+                ...form,
+                legalForm: form.legalForm || null,
+                parentSubjectId: form.parentSubjectId || null,
+                notes: form.notes || null,
+                updatedAt: new Date().toISOString(),
+              }
+            : s,
+        ),
+      )
+    } else {
+      const newSubject: Subject = {
+        id: `s-${Date.now()}`,
+        type: form.type,
+        name: form.name,
+        legalForm: form.legalForm || null,
+        country: form.country,
+        role: form.role,
+        parentSubjectId: form.parentSubjectId || null,
+        notes: form.notes || null,
+        isActive: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }
+      setSubjects((prev) => [...prev, newSubject])
+    }
+    setShowModal(false)
+  }
+
+  function handleToggleActive(subject: Subject) {
+    setSubjects((prev) =>
+      prev.map((s) =>
+        s.id === subject.id
+          ? { ...s, isActive: !s.isActive, updatedAt: new Date().toISOString() }
+          : s,
+      ),
+    )
+    setMenuOpen(null)
+  }
+
+  function handleDelete(subject: Subject) {
+    if (getContainersBySubject(subject.id).length > 0) {
+      alert('Impossibile eliminare: il soggetto ha contenitori associati.')
+      return
+    }
+    setSubjects((prev) => prev.filter((s) => s.id !== subject.id))
+    setMenuOpen(null)
+  }
+
+  function getParentName(parentId: string | null | undefined): string | null {
+    if (!parentId) return null
+    const parent = subjects.find((s) => s.id === parentId)
+    return parent ? parent.name : null
+  }
+
+  function getContainerCount(subjectId: string): number {
+    return CONTAINERS.filter((c) => c.subjectId === subjectId).length
+  }
+
+  function renderSubjectCard(subject: Subject) {
+    const containerCount = getContainerCount(subject.id)
+    const parentName = getParentName(subject.parentSubjectId)
+    const isCompany = subject.type === 'company'
+
+    return (
+      <div
+        key={subject.id}
+        className={`bg-zinc-900 border border-zinc-800 rounded-xl p-4 hover:border-zinc-700 transition-colors relative ${
+          !subject.isActive ? 'opacity-50' : ''
+        }`}
+      >
+        <div className="flex items-start justify-between">
+          <div className="flex items-center gap-3">
+            <div className={`flex h-10 w-10 items-center justify-center rounded-full ${
+              isCompany ? 'bg-amber-500/10' : 'bg-blue-500/10'
+            }`}>
+              {isCompany ? (
+                <Building2 className="h-5 w-5 text-amber-400" />
+              ) : (
+                <User className="h-5 w-5 text-blue-400" />
+              )}
+            </div>
+            <div>
+              <p className="font-semibold text-zinc-100">{subject.name}</p>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className="text-sm">{countryFlags[subject.country] || subject.country}</span>
+                {subject.legalForm && (
+                  <span className="text-xs text-zinc-500">{subject.legalForm}</span>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="relative">
+            <button
+              className="rounded-md p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+              onClick={() => setMenuOpen(menuOpen === subject.id ? null : subject.id)}
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </button>
+            {menuOpen === subject.id && (
+              <div className="absolute right-0 top-8 z-10 w-44 rounded-lg border border-zinc-700 bg-zinc-800 py-1 shadow-xl">
+                <button
+                  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-700"
+                  onClick={() => openEdit(subject)}
+                >
+                  <Pencil className="h-3.5 w-3.5" /> Modifica
+                </button>
+                <button
+                  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-700"
+                  onClick={() => handleToggleActive(subject)}
+                >
+                  {subject.isActive ? (
+                    <><EyeOff className="h-3.5 w-3.5" /> Disattiva</>
+                  ) : (
+                    <><Eye className="h-3.5 w-3.5" /> Riattiva</>
+                  )}
+                </button>
+                <button
+                  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-zinc-700"
+                  onClick={() => handleDelete(subject)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> Elimina
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-4 space-y-2">
+          {parentName && (
+            <div className="flex items-center gap-1 text-xs text-zinc-500">
+              <ChevronRight className="h-3 w-3" />
+              <span>Collegato a <span className="text-zinc-400">{parentName}</span></span>
+            </div>
+          )}
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-zinc-500">Ruolo</span>
+            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+              roleColors[subject.role || 'other'] || roleColors['other']
+            }`}>
+              {roleLabels[subject.role || 'other'] || 'Altro'}
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-zinc-500">Contenitori</span>
+            <span className="text-xs text-zinc-300 font-medium">{containerCount}</span>
+          </div>
+          {!subject.isActive && (
+            <span className="inline-block rounded-full bg-zinc-700 px-2 py-0.5 text-xs text-zinc-400">
+              Inattivo
+            </span>
+          )}
+          {subject.notes && (
+            <p className="text-xs text-zinc-500 italic pt-1 border-t border-zinc-800">
+              {subject.notes}
+            </p>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  function renderSubjectRow(subject: Subject) {
+    const containerCount = getContainerCount(subject.id)
+    const parentName = getParentName(subject.parentSubjectId)
+    const isCompany = subject.type === 'company'
+
+    return (
+      <div
+        key={subject.id}
+        className={`flex items-center gap-4 px-6 py-3 hover:bg-zinc-800/30 transition-colors ${
+          !subject.isActive ? 'opacity-50' : ''
+        }`}
+      >
+        <div className={`flex h-8 w-8 items-center justify-center rounded-full shrink-0 ${
+          isCompany ? 'bg-amber-500/10' : 'bg-blue-500/10'
+        }`}>
+          {isCompany ? (
+            <Building2 className="h-4 w-4 text-amber-400" />
+          ) : (
+            <User className="h-4 w-4 text-blue-400" />
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-medium text-zinc-200 truncate">{subject.name}</p>
+            {subject.legalForm && (
+              <span className="text-xs text-zinc-500">{subject.legalForm}</span>
+            )}
+          </div>
+          {parentName && (
+            <p className="text-xs text-zinc-500 flex items-center gap-1">
+              <ChevronRight className="h-3 w-3" /> {parentName}
+            </p>
+          )}
+        </div>
+        <span className="text-sm shrink-0">{countryFlags[subject.country] || subject.country}</span>
+        <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+          roleColors[subject.role || 'other'] || roleColors['other']
+        }`}>
+          {roleLabels[subject.role || 'other'] || 'Altro'}
+        </span>
+        <div className="shrink-0 flex items-center gap-1 text-xs text-zinc-400 w-16 justify-center">
+          <Wallet className="h-3 w-3" /> {containerCount}
+        </div>
+        <div className="shrink-0 flex items-center gap-1">
+          <button
+            className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+            onClick={() => openEdit(subject)}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+          <button
+            className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+            onClick={() => handleToggleActive(subject)}
+          >
+            {subject.isActive ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" onClick={() => menuOpen && setMenuOpen(null)}>
       {/* Page header */}
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold text-zinc-100">Soggetti</h1>
           <p className="mt-1 text-sm text-zinc-400">
-            Gestione persone fisiche e societa' collegate alle tue finanze
+            {subjects.filter((s) => s.isActive).length} soggetti attivi ({persons.length} persone, {companies.length} societa')
           </p>
         </div>
-        <button className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors">
+        <button
+          className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors"
+          onClick={openCreate}
+        >
           <Plus className="h-4 w-4" />
           Nuovo Soggetto
         </button>
       </div>
 
-      {/* Search and view toggle */}
+      {/* Search and controls */}
       <div className="flex items-center gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
           <input
             type="text"
             placeholder="Cerca soggetti..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
             className="w-full rounded-lg border border-zinc-700 bg-zinc-800 py-2 pl-10 pr-4 text-sm text-zinc-200 placeholder-zinc-500 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500"
           />
         </div>
+        <button
+          className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs transition-colors ${
+            showInactive
+              ? 'border-energy-500 bg-energy-500/10 text-energy-400'
+              : 'border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600'
+          }`}
+          onClick={() => setShowInactive(!showInactive)}
+        >
+          <EyeOff className="h-3.5 w-3.5" />
+          Inattivi
+        </button>
         <div className="flex rounded-lg border border-zinc-700 bg-zinc-800">
-          <button className="rounded-l-lg bg-zinc-700 p-2 text-zinc-200">
+          <button
+            className={`rounded-l-lg p-2 ${viewMode === 'grid' ? 'bg-zinc-700 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}
+            onClick={() => setViewMode('grid')}
+          >
             <LayoutGrid className="h-4 w-4" />
           </button>
-          <button className="rounded-r-lg p-2 text-zinc-500 hover:text-zinc-300">
+          <button
+            className={`rounded-r-lg p-2 ${viewMode === 'list' ? 'bg-zinc-700 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}
+            onClick={() => setViewMode('list')}
+          >
             <List className="h-4 w-4" />
           </button>
         </div>
       </div>
 
       {/* Subjects sections */}
-      <div className="space-y-8">
-        {/* Persone fisiche */}
-        <div>
-          <div className="flex items-center gap-2 mb-3">
-            <User className="h-5 w-5 text-zinc-400" />
-            <h2 className="text-lg font-semibold text-zinc-200">Persone Fisiche</h2>
-            <span className="ml-1 rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-500">
-              {mockSubjects.filter((s) => s.type === 'person').length}
-            </span>
-          </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {mockSubjects
-              .filter((s) => s.type === 'person')
-              .map((subject) => (
-                <div
-                  key={subject.id}
-                  className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 hover:border-zinc-700 transition-colors cursor-pointer"
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-800">
-                        <User className="h-5 w-5 text-zinc-400" />
-                      </div>
-                      <div>
-                        <p className="font-semibold text-zinc-100">{subject.name}</p>
-                        <p className="text-xs text-zinc-500">{subject.country}</p>
-                      </div>
-                    </div>
-                    <button className="rounded-md p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300">
-                      <MoreHorizontal className="h-4 w-4" />
-                    </button>
-                  </div>
-                  <div className="mt-4 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-zinc-500">Ruolo</span>
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${roleColors[subject.role] || roleColors['Altro']}`}>
-                        {subject.role}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-zinc-500">Contenitori</span>
-                      <span className="text-xs text-zinc-300">{subject.containers}</span>
-                    </div>
-                    {subject.taxId && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-zinc-500">Cod. Fiscale</span>
-                        <span className="text-xs text-zinc-400 font-mono">{subject.taxId}</span>
-                      </div>
-                    )}
-                    {subject.notes && (
-                      <p className="text-xs text-zinc-500 italic pt-1 border-t border-zinc-800">
-                        {subject.notes}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              ))}
-          </div>
-        </div>
+      {viewMode === 'grid' ? (
+        <div className="space-y-8">
+          {/* Persone fisiche */}
+          {persons.length > 0 && (
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <User className="h-5 w-5 text-blue-400" />
+                <h2 className="text-lg font-semibold text-zinc-200">Persone Fisiche</h2>
+                <span className="ml-1 rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-500">
+                  {persons.length}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {persons.map(renderSubjectCard)}
+              </div>
+            </div>
+          )}
 
-        {/* Societa' */}
-        <div>
-          <div className="flex items-center gap-2 mb-3">
-            <Building2 className="h-5 w-5 text-zinc-400" />
-            <h2 className="text-lg font-semibold text-zinc-200">Societa'</h2>
-            <span className="ml-1 rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-500">
-              {mockSubjects.filter((s) => s.type === 'company').length}
-            </span>
-          </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {mockSubjects
-              .filter((s) => s.type === 'company')
-              .map((subject) => (
-                <div
-                  key={subject.id}
-                  className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 hover:border-zinc-700 transition-colors cursor-pointer"
+          {/* Societa' */}
+          {companies.length > 0 && (
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <Building2 className="h-5 w-5 text-amber-400" />
+                <h2 className="text-lg font-semibold text-zinc-200">Societa'</h2>
+                <span className="ml-1 rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-500">
+                  {companies.length}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {companies.map(renderSubjectCard)}
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {persons.length > 0 && (
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+              <div className="flex items-center gap-2 px-6 py-3 border-b border-zinc-800">
+                <User className="h-4 w-4 text-blue-400" />
+                <span className="text-sm font-semibold text-zinc-200">Persone Fisiche</span>
+                <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-500">{persons.length}</span>
+              </div>
+              <div className="divide-y divide-zinc-800/50">
+                {persons.map(renderSubjectRow)}
+              </div>
+            </div>
+          )}
+          {companies.length > 0 && (
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+              <div className="flex items-center gap-2 px-6 py-3 border-b border-zinc-800">
+                <Building2 className="h-4 w-4 text-amber-400" />
+                <span className="text-sm font-semibold text-zinc-200">Societa'</span>
+                <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-500">{companies.length}</span>
+              </div>
+              <div className="divide-y divide-zinc-800/50">
+                {companies.map(renderSubjectRow)}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Create/Edit Modal */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
+              <h2 className="text-lg font-semibold text-zinc-100">
+                {editingSubject ? 'Modifica Soggetto' : 'Nuovo Soggetto'}
+              </h2>
+              <button
+                className="rounded-md p-1 text-zinc-400 hover:text-zinc-200"
+                onClick={() => setShowModal(false)}
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {/* Type */}
+              <div className="flex gap-3">
+                <button
+                  className={`flex-1 flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                    form.type === 'person'
+                      ? 'border-blue-500 bg-blue-500/10 text-blue-400'
+                      : 'border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600'
+                  }`}
+                  onClick={() => setForm({ ...form, type: 'person', legalForm: '' })}
                 >
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-800">
-                        <Building2 className="h-5 w-5 text-zinc-400" />
-                      </div>
-                      <div>
-                        <p className="font-semibold text-zinc-100">{subject.name}</p>
-                        <p className="text-xs text-zinc-500">{subject.country}</p>
-                      </div>
-                    </div>
-                    <button className="rounded-md p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300">
-                      <MoreHorizontal className="h-4 w-4" />
-                    </button>
-                  </div>
-                  <div className="mt-4 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-zinc-500">Ruolo</span>
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${roleColors[subject.role] || roleColors['Altro']}`}>
-                        {subject.role}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-zinc-500">Contenitori</span>
-                      <span className="text-xs text-zinc-300">{subject.containers}</span>
-                    </div>
-                    {subject.taxId && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-zinc-500">P. IVA</span>
-                        <span className="text-xs text-zinc-400 font-mono">{subject.taxId}</span>
-                      </div>
-                    )}
-                    {subject.notes && (
-                      <p className="text-xs text-zinc-500 italic pt-1 border-t border-zinc-800">
-                        {subject.notes}
-                      </p>
-                    )}
-                  </div>
+                  <User className="h-4 w-4" /> Persona Fisica
+                </button>
+                <button
+                  className={`flex-1 flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                    form.type === 'company'
+                      ? 'border-amber-500 bg-amber-500/10 text-amber-400'
+                      : 'border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600'
+                  }`}
+                  onClick={() => setForm({ ...form, type: 'company' })}
+                >
+                  <Building2 className="h-4 w-4" /> Societa'
+                </button>
+              </div>
+
+              {/* Name */}
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Nome *</label>
+                <input
+                  type="text"
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500"
+                  placeholder={form.type === 'person' ? 'es. Andrea Vaturi' : 'es. Kairos SRLS'}
+                />
+              </div>
+
+              {/* Legal form (only for companies) */}
+              {form.type === 'company' && (
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Forma Giuridica</label>
+                  <input
+                    type="text"
+                    value={form.legalForm}
+                    onChange={(e) => setForm({ ...form, legalForm: e.target.value })}
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500"
+                    placeholder="es. SRLS, SRL, LTD, SSRL..."
+                  />
                 </div>
-              ))}
+              )}
+
+              {/* Country + Role */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">
+                    <Globe className="inline h-3 w-3 mr-1" />Paese
+                  </label>
+                  <select
+                    value={form.country}
+                    onChange={(e) => setForm({ ...form, country: e.target.value })}
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none"
+                  >
+                    <option value="IT">Italia</option>
+                    <option value="GB">UK</option>
+                    <option value="RO">Romania</option>
+                    <option value="US">USA</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">
+                    <Users className="inline h-3 w-3 mr-1" />Ruolo
+                  </label>
+                  <select
+                    value={form.role}
+                    onChange={(e) => setForm({ ...form, role: e.target.value as SubjectRole })}
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none"
+                  >
+                    <option value="owner">Titolare</option>
+                    <option value="family">Familiare</option>
+                    <option value="partner">Partner</option>
+                    <option value="other">Altro</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Parent subject */}
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Soggetto Genitore (opzionale)</label>
+                <select
+                  value={form.parentSubjectId}
+                  onChange={(e) => setForm({ ...form, parentSubjectId: e.target.value })}
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none"
+                >
+                  <option value="">— Nessuno —</option>
+                  {subjects
+                    .filter((s) => s.id !== editingSubject?.id && s.isActive)
+                    .map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                </select>
+              </div>
+
+              {/* Notes */}
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Note</label>
+                <textarea
+                  value={form.notes}
+                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                  rows={2}
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500 resize-none"
+                  placeholder="Note aggiuntive..."
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-zinc-800">
+              <button
+                className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-700 transition-colors"
+                onClick={() => setShowModal(false)}
+              >
+                Annulla
+              </button>
+              <button
+                className="rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors disabled:opacity-50"
+                onClick={handleSave}
+                disabled={!form.name.trim()}
+              >
+                {editingSubject ? 'Salva Modifiche' : 'Crea Soggetto'}
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }
