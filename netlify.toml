@@ -6,6 +6,12 @@
 [functions]
   node_bundler = "esbuild"
 
+# Proxy /api/* to the Netlify Function (cleaner URLs)
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+
 # SPA redirect: serve index.html for all routes not matching a file
 [[redirects]]
   from = "/*"

@@ -19,6 +19,8 @@ import {
   ArrowDown,
   ArrowUpDown,
   X,
+  Pencil,
+  Trash2,
 } from 'lucide-react'
 import type { Transaction, TransactionType, TransactionStatus } from '@/types'
 import { TRANSACTIONS, CONTAINERS, COUNTERPARTIES, SUBJECTS } from '@/lib/mockData'
@@ -102,22 +104,26 @@ const statusOptions: { value: TransactionStatus; label: string }[] = [
 function TransactionModal({
   onClose,
   onSave,
+  existing,
 }: {
   onClose: () => void
   onSave: (tx: Transaction) => void
+  existing?: Transaction | null
 }) {
+  const isEdit = !!existing
+
   const [form, setForm] = useState({
-    date: new Date().toISOString().slice(0, 10),
-    description: '',
-    amount: '',
-    currency: 'EUR',
-    containerId: CONTAINERS[0]?.id ?? '',
-    counterpartyId: '',
-    type: 'expense' as TransactionType,
-    status: 'completed' as TransactionStatus,
-    notes: '',
-    sharedWithSubjectId: '',
-    sharePercentage: '',
+    date: existing?.date ?? new Date().toISOString().slice(0, 10),
+    description: existing?.description ?? '',
+    amount: existing ? String(Math.abs(parseFloat(existing.amount))) : '',
+    currency: existing?.currency ?? 'EUR',
+    containerId: existing?.containerId ?? (CONTAINERS[0]?.id ?? ''),
+    counterpartyId: existing?.counterpartyId ?? '',
+    type: (existing?.type ?? 'expense') as TransactionType,
+    status: (existing?.status ?? 'completed') as TransactionStatus,
+    notes: existing?.notes ?? '',
+    sharedWithSubjectId: existing?.sharedWithSubjectId ?? '',
+    sharePercentage: existing?.sharePercentage ?? '',
   })
 
   function handleSave() {
@@ -128,7 +134,8 @@ function TransactionModal({
     const finalAmt = isOut && rawAmt > 0 ? -rawAmt : rawAmt
 
     const tx: Transaction = {
-      id: `tx-${Date.now()}`,
+      ...(existing ?? {}),
+      id: existing?.id ?? `tx-${Date.now()}`,
       date: form.date,
       description: form.description,
       amount: finalAmt.toFixed(2),
@@ -137,11 +144,11 @@ function TransactionModal({
       counterpartyId: form.counterpartyId || null,
       type: form.type,
       status: form.status,
-      source: 'manual',
+      source: existing?.source ?? 'manual',
       notes: form.notes || null,
       sharedWithSubjectId: form.sharedWithSubjectId || null,
       sharePercentage: form.sharePercentage || null,
-      createdAt: new Date().toISOString(),
+      createdAt: existing?.createdAt ?? new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }
     onSave(tx)
@@ -154,7 +161,7 @@ function TransactionModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <div className="w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
-          <h2 className="text-lg font-semibold text-zinc-100">Nuova Transazione</h2>
+          <h2 className="text-lg font-semibold text-zinc-100">{isEdit ? 'Modifica Transazione' : 'Nuova Transazione'}</h2>
           <button onClick={onClose} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200">
             <X className="h-5 w-5" />
           </button>
@@ -262,7 +269,7 @@ function TransactionModal({
             disabled={!form.description.trim() || !form.amount || !form.containerId}
             className="rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            Salva Transazione
+            {isEdit ? 'Salva Modifiche' : 'Salva Transazione'}
           </button>
         </div>
       </div>
@@ -276,6 +283,12 @@ export function Transactions() {
   // Local transactions state (so new ones appear)
   const [transactions, setTransactions] = useState<Transaction[]>(TRANSACTIONS)
   const [showCreate, setShowCreate] = useState(false)
+  const [editingTx, setEditingTx] = useState<Transaction | null>(null)
+
+  function handleDeleteTx(id: string) {
+    if (!confirm('Eliminare questa transazione?')) return
+    setTransactions((prev) => prev.filter((t) => t.id !== id))
+  }
 
   // Filter state
   const [searchText, setSearchText] = useState('')
@@ -464,6 +477,29 @@ export function Transactions() {
           const b = parseFloat(rowB.original.amount)
           return a - b
         },
+      },
+      {
+        id: 'actions',
+        header: '',
+        enableSorting: false,
+        cell: ({ row }) => (
+          <div className="flex items-center gap-1">
+            <button
+              onClick={(e) => { e.stopPropagation(); setEditingTx(row.original) }}
+              className="rounded p-1.5 text-zinc-500 hover:text-energy-400 hover:bg-zinc-800 transition-colors"
+              title="Modifica"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); handleDeleteTx(row.original.id) }}
+              className="rounded p-1.5 text-zinc-500 hover:text-red-400 hover:bg-zinc-800 transition-colors"
+              title="Elimina"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ),
       },
     ],
     [],
@@ -714,6 +750,7 @@ export function Transactions() {
                   <tr
                     key={row.id}
                     className="hover:bg-zinc-800/30 transition-colors cursor-pointer"
+                    onClick={() => setEditingTx(row.original)}
                   >
                     {row.getVisibleCells().map((cell) => (
                       <td key={cell.id} className="px-4 py-3 text-zinc-300">
@@ -764,6 +801,18 @@ export function Transactions() {
           onSave={(tx) => {
             setTransactions((prev) => [tx, ...prev])
             setShowCreate(false)
+          }}
+        />
+      )}
+
+      {/* ── Edit Modal ───────────────────────────────────── */}
+      {editingTx && (
+        <TransactionModal
+          existing={editingTx}
+          onClose={() => setEditingTx(null)}
+          onSave={(tx) => {
+            setTransactions((prev) => prev.map((t) => t.id === tx.id ? tx : t))
+            setEditingTx(null)
           }}
         />
       )}
