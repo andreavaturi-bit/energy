@@ -21,7 +21,7 @@ import {
   X,
 } from 'lucide-react'
 import type { Transaction, TransactionType, TransactionStatus } from '@/types'
-import { TRANSACTIONS, CONTAINERS, COUNTERPARTIES } from '@/lib/mockData'
+import { TRANSACTIONS, CONTAINERS, COUNTERPARTIES, SUBJECTS } from '@/lib/mockData'
 import {
   formatCurrency,
   formatDate,
@@ -97,9 +97,186 @@ const statusOptions: { value: TransactionStatus; label: string }[] = [
   { value: 'cancelled', label: 'Annullata' },
 ]
 
+// ── Transaction Modal ───────────────────────────────────────
+
+function TransactionModal({
+  onClose,
+  onSave,
+}: {
+  onClose: () => void
+  onSave: (tx: Transaction) => void
+}) {
+  const [form, setForm] = useState({
+    date: new Date().toISOString().slice(0, 10),
+    description: '',
+    amount: '',
+    currency: 'EUR',
+    containerId: CONTAINERS[0]?.id ?? '',
+    counterpartyId: '',
+    type: 'expense' as TransactionType,
+    status: 'completed' as TransactionStatus,
+    notes: '',
+    sharedWithSubjectId: '',
+    sharePercentage: '',
+  })
+
+  function handleSave() {
+    if (!form.description.trim() || !form.amount || !form.containerId) return
+
+    const isOut = ['expense', 'transfer_out', 'capital_injection', 'loan_out', 'repayment_out'].includes(form.type)
+    const rawAmt = parseFloat(form.amount)
+    const finalAmt = isOut && rawAmt > 0 ? -rawAmt : rawAmt
+
+    const tx: Transaction = {
+      id: `tx-${Date.now()}`,
+      date: form.date,
+      description: form.description,
+      amount: finalAmt.toFixed(2),
+      currency: form.currency,
+      containerId: form.containerId,
+      counterpartyId: form.counterpartyId || null,
+      type: form.type,
+      status: form.status,
+      source: 'manual',
+      notes: form.notes || null,
+      sharedWithSubjectId: form.sharedWithSubjectId || null,
+      sharePercentage: form.sharePercentage || null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+    onSave(tx)
+  }
+
+  const inputCls = 'w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500'
+  const labelCls = 'block text-xs font-medium text-zinc-400 mb-1'
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
+          <h2 className="text-lg font-semibold text-zinc-100">Nuova Transazione</h2>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="space-y-4 px-6 py-5">
+          {/* Row: Date + Type */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>Data *</label>
+              <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className={`${inputCls} [color-scheme:dark]`} />
+            </div>
+            <div>
+              <label className={labelCls}>Tipo *</label>
+              <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as TransactionType })} className={inputCls}>
+                {typeOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Description */}
+          <div>
+            <label className={labelCls}>Descrizione *</label>
+            <input type="text" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Descrizione della transazione..." className={inputCls} />
+          </div>
+
+          {/* Row: Amount + Currency */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="col-span-2">
+              <label className={labelCls}>Importo *</label>
+              <input type="number" step="0.01" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} placeholder="0,00" className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Valuta</label>
+              <select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })} className={inputCls}>
+                <option value="EUR">EUR</option>
+                <option value="USD">USD</option>
+                <option value="GBP">GBP</option>
+                <option value="RON">RON</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Container */}
+          <div>
+            <label className={labelCls}>Contenitore *</label>
+            <select value={form.containerId} onChange={(e) => setForm({ ...form, containerId: e.target.value })} className={inputCls}>
+              {CONTAINERS.filter((c) => c.isActive).map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Counterparty */}
+          <div>
+            <label className={labelCls}>Controparte</label>
+            <select value={form.counterpartyId} onChange={(e) => setForm({ ...form, counterpartyId: e.target.value })} className={inputCls}>
+              <option value="">— Nessuna —</option>
+              {COUNTERPARTIES.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Status */}
+          <div>
+            <label className={labelCls}>Stato</label>
+            <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as TransactionStatus })} className={inputCls}>
+              {statusOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+
+          {/* Cost sharing */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>Condiviso con</label>
+              <select value={form.sharedWithSubjectId} onChange={(e) => setForm({ ...form, sharedWithSubjectId: e.target.value })} className={inputCls}>
+                <option value="">— Nessuno —</option>
+                {SUBJECTS.filter((s) => s.role === 'partner').map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+            {form.sharedWithSubjectId && (
+              <div>
+                <label className={labelCls}>Quota %</label>
+                <input type="number" min="1" max="100" value={form.sharePercentage} onChange={(e) => setForm({ ...form, sharePercentage: e.target.value })} placeholder="50" className={inputCls} />
+              </div>
+            )}
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label className={labelCls}>Note</label>
+            <textarea rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Note opzionali..." className={inputCls} />
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-3 border-t border-zinc-800 px-6 py-4">
+          <button onClick={onClose} className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:border-zinc-600">
+            Annulla
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={!form.description.trim() || !form.amount || !form.containerId}
+            className="rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            Salva Transazione
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Component ───────────────────────────────────────────────
 
 export function Transactions() {
+  // Local transactions state (so new ones appear)
+  const [transactions, setTransactions] = useState<Transaction[]>(TRANSACTIONS)
+  const [showCreate, setShowCreate] = useState(false)
+
   // Filter state
   const [searchText, setSearchText] = useState('')
   const [dateFrom, setDateFrom] = useState('')
@@ -116,7 +293,7 @@ export function Transactions() {
 
   // ── Pre-filter data based on filter-bar controls ──────────
   const filteredData = useMemo(() => {
-    let data = [...TRANSACTIONS]
+    let data = [...transactions]
 
     // Text search (description + notes)
     if (searchText) {
@@ -152,7 +329,7 @@ export function Transactions() {
     }
 
     return data
-  }, [searchText, dateFrom, dateTo, containerId, typeFilter, statusFilter])
+  }, [transactions, searchText, dateFrom, dateTo, containerId, typeFilter, statusFilter])
 
   // ── Summary calculations ──────────────────────────────────
   const summary = useMemo(() => {
@@ -171,9 +348,9 @@ export function Transactions() {
       expenses,
       net: income + expenses,
       filteredCount: filteredData.length,
-      totalCount: TRANSACTIONS.length,
+      totalCount: transactions.length,
     }
-  }, [filteredData])
+  }, [filteredData, transactions.length])
 
   // ── Has any active filter ─────────────────────────────────
   const hasFilters =
@@ -318,11 +495,11 @@ export function Transactions() {
 
   // ── Unique containers used in transactions for dropdown ───
   const containerOptions = useMemo(() => {
-    const ids = new Set(TRANSACTIONS.map((t) => t.containerId))
+    const ids = new Set(transactions.map((t) => t.containerId))
     return CONTAINERS.filter((c) => ids.has(c.id)).sort((a, b) =>
       a.name.localeCompare(b.name),
     )
-  }, [])
+  }, [transactions])
 
   // ── Render ────────────────────────────────────────────────
   return (
@@ -335,7 +512,10 @@ export function Transactions() {
             Registro completo di tutte le operazioni finanziarie
           </p>
         </div>
-        <button className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors">
+        <button
+          onClick={() => setShowCreate(true)}
+          className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors"
+        >
           <Plus className="h-4 w-4" />
           Nuova Transazione
         </button>
@@ -576,6 +756,17 @@ export function Transactions() {
           </div>
         </div>
       </div>
+
+      {/* ── Create Modal ─────────────────────────────────── */}
+      {showCreate && (
+        <TransactionModal
+          onClose={() => setShowCreate(false)}
+          onSave={(tx) => {
+            setTransactions((prev) => [tx, ...prev])
+            setShowCreate(false)
+          }}
+        />
+      )}
     </div>
   )
 }

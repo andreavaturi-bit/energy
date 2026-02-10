@@ -13,6 +13,7 @@ import {
   Wallet,
   Globe,
   CircleDot,
+  X,
 } from 'lucide-react'
 import type { ContainerType, Container } from '@/types'
 import { CONTAINERS, SUBJECTS } from '@/lib/mockData'
@@ -47,6 +48,15 @@ const TYPE_ORDER: ContainerType[] = [
   'other',
 ]
 
+const COLORS = [
+  '#0066CC', '#0075EB', '#22C55E', '#003087', '#EF4444', '#C5A44E',
+  '#F59E0B', '#EC4899', '#D62B1F', '#1A1A2E', '#FF6600', '#006837',
+  '#D4A017', '#DC143C', '#5B21B6', '#00A3E0', '#4A90D9', '#F3BA2F',
+  '#103F68', '#0052FF', '#694ED6', '#57E099', '#3375BB', '#4C6EF5',
+  '#00BFA5', '#E2761B', '#F7A600', '#7B61FF', '#635BFF', '#9FE870',
+  '#FFD700', '#8B5CF6', '#71717a',
+]
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -58,10 +68,214 @@ function subjectName(subjectId: string): string {
 type Grouping = 'type' | 'subject'
 
 // ---------------------------------------------------------------------------
+// Container Modal
+// ---------------------------------------------------------------------------
+
+function ContainerModal({
+  onClose,
+  onSave,
+}: {
+  onClose: () => void
+  onSave: (c: Container) => void
+}) {
+  const [form, setForm] = useState({
+    name: '',
+    type: 'bank_account' as ContainerType,
+    subjectId: SUBJECTS[0]?.id ?? '',
+    provider: '',
+    currency: 'EUR',
+    initialBalance: '0',
+    isMultiCurrency: false,
+    color: '#0066CC',
+    isActive: true,
+    notes: '',
+    billingDay: '',
+  })
+
+  function handleSave() {
+    if (!form.name.trim() || !form.subjectId) return
+
+    const container: Container = {
+      id: `c-${Date.now()}`,
+      subjectId: form.subjectId,
+      name: form.name.trim(),
+      type: form.type,
+      provider: form.provider || null,
+      currency: form.currency,
+      isMultiCurrency: form.isMultiCurrency,
+      initialBalance: form.initialBalance || '0',
+      billingDay: form.billingDay ? parseInt(form.billingDay) : null,
+      linkedContainerId: null,
+      goalAmount: null,
+      goalDescription: null,
+      icon: null,
+      color: form.color,
+      sortOrder: 999,
+      isActive: form.isActive,
+      notes: form.notes || null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+    onSave(container)
+  }
+
+  const inputCls = 'w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500'
+  const labelCls = 'block text-xs font-medium text-zinc-400 mb-1'
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
+          <h2 className="text-lg font-semibold text-zinc-100">Nuovo Contenitore</h2>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="space-y-4 px-6 py-5">
+          {/* Name */}
+          <div>
+            <label className={labelCls}>Nome *</label>
+            <input type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Nome del contenitore..." className={inputCls} />
+          </div>
+
+          {/* Row: Type + Subject */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>Tipo *</label>
+              <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as ContainerType })} className={inputCls}>
+                {TYPE_ORDER.map((t) => (
+                  <option key={t} value={t}>{containerTypeLabel(t)}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Soggetto *</label>
+              <select value={form.subjectId} onChange={(e) => setForm({ ...form, subjectId: e.target.value })} className={inputCls}>
+                {SUBJECTS.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Provider */}
+          <div>
+            <label className={labelCls}>Provider / Istituto</label>
+            <input type="text" value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value })} placeholder="Es. Intesa Sanpaolo, Revolut..." className={inputCls} />
+          </div>
+
+          {/* Row: Currency + Balance + Billing Day */}
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className={labelCls}>Valuta</label>
+              <select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })} className={inputCls}>
+                <option value="EUR">EUR</option>
+                <option value="USD">USD</option>
+                <option value="GBP">GBP</option>
+                <option value="RON">RON</option>
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Saldo Iniziale</label>
+              <input type="number" step="0.01" value={form.initialBalance} onChange={(e) => setForm({ ...form, initialBalance: e.target.value })} className={inputCls} />
+            </div>
+            {form.type === 'credit_card' && (
+              <div>
+                <label className={labelCls}>Giorno Addebito</label>
+                <input type="number" min="1" max="31" value={form.billingDay} onChange={(e) => setForm({ ...form, billingDay: e.target.value })} placeholder="10" className={inputCls} />
+              </div>
+            )}
+          </div>
+
+          {/* Toggles row */}
+          <div className="flex items-center gap-6">
+            {/* Multi-currency toggle */}
+            <label className="flex items-center gap-2 cursor-pointer select-none text-sm text-zinc-400">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={form.isMultiCurrency}
+                onClick={() => setForm({ ...form, isMultiCurrency: !form.isMultiCurrency })}
+                className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+                  form.isMultiCurrency ? 'bg-energy-500' : 'bg-zinc-700'
+                }`}
+              >
+                <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${
+                  form.isMultiCurrency ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                }`} />
+              </button>
+              Multi-valuta
+            </label>
+
+            {/* Active toggle */}
+            <label className="flex items-center gap-2 cursor-pointer select-none text-sm text-zinc-400">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={form.isActive}
+                onClick={() => setForm({ ...form, isActive: !form.isActive })}
+                className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+                  form.isActive ? 'bg-energy-500' : 'bg-zinc-700'
+                }`}
+              >
+                <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${
+                  form.isActive ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                }`} />
+              </button>
+              Attivo
+            </label>
+          </div>
+
+          {/* Color picker */}
+          <div>
+            <label className={labelCls}>Colore</label>
+            <div className="flex flex-wrap gap-2">
+              {COLORS.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setForm({ ...form, color: c })}
+                  className={`h-6 w-6 rounded-full border-2 transition-all ${
+                    form.color === c ? 'border-white scale-110' : 'border-transparent'
+                  }`}
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label className={labelCls}>Note</label>
+            <textarea rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Note opzionali..." className={inputCls} />
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-3 border-t border-zinc-800 px-6 py-4">
+          <button onClick={onClose} className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:border-zinc-600">
+            Annulla
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={!form.name.trim() || !form.subjectId}
+            className="rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            Salva Contenitore
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
 export function Containers() {
+  const [containers, setContainers] = useState<Container[]>(CONTAINERS)
+  const [showCreate, setShowCreate] = useState(false)
   const [search, setSearch] = useState('')
   const [subjectFilter, setSubjectFilter] = useState<string>('all')
   const [showInactive, setShowInactive] = useState(false)
@@ -70,7 +284,7 @@ export function Containers() {
   // ------ filtered list ------
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim()
-    return CONTAINERS.filter((c) => {
+    return containers.filter((c) => {
       // active filter
       if (!showInactive && !c.isActive) return false
       // subject filter
@@ -82,7 +296,7 @@ export function Containers() {
       }
       return true
     })
-  }, [search, subjectFilter, showInactive])
+  }, [containers, search, subjectFilter, showInactive])
 
   // ------ grouped data ------
   const groups = useMemo(() => {
@@ -112,11 +326,11 @@ export function Containers() {
     }
     return Array.from(map.entries())
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([name, containers]) => ({
+      .map(([name, ctrs]) => ({
         key: name,
         label: name,
         Icon: null as (typeof Landmark) | null,
-        containers,
+        containers: ctrs,
       }))
   }, [filtered, grouping])
 
@@ -161,7 +375,10 @@ export function Containers() {
             <span className="font-semibold text-zinc-200">{headerBalance}</span>
           </p>
         </div>
-        <button className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors self-start">
+        <button
+          onClick={() => setShowCreate(true)}
+          className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors self-start"
+        >
           <Plus className="h-4 w-4" />
           Nuovo Contenitore
         </button>
@@ -380,6 +597,17 @@ export function Containers() {
           </div>
         </div>
       </div>
+
+      {/* ============ CREATE MODAL ============ */}
+      {showCreate && (
+        <ContainerModal
+          onClose={() => setShowCreate(false)}
+          onSave={(c) => {
+            setContainers((prev) => [...prev, c])
+            setShowCreate(false)
+          }}
+        />
+      )}
     </div>
   )
 }
