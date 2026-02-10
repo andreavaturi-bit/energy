@@ -5,14 +5,15 @@ let _supabase: SupabaseClient | null = null
 
 /**
  * Returns a Supabase client (reused within invocation).
- * Requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY env vars in Vercel dashboard.
+ * Accepts SUPABASE_SERVICE_ROLE_KEY (preferred) or SUPABASE_ANON_KEY.
+ * Both work when RLS is not enabled on the tables.
  */
 export function getSupabase(): SupabaseClient {
   if (_supabase) return _supabase
   const url = process.env.SUPABASE_URL
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
   if (!url || !key) {
-    throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are not set')
+    throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_ANON_KEY) are not set')
   }
   _supabase = createClient(url, key)
   return _supabase
