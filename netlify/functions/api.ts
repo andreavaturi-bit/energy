@@ -99,7 +99,11 @@ async function handleContainers(event: HandlerEvent, id: string | null): RouteRe
 
   if (method === 'GET' && !id) {
     const rows = await sql`
-      SELECT c.*, s.name as subject_name
+      SELECT c.*, s.name as subject_name,
+        (c.initial_balance + COALESCE(
+          (SELECT SUM(t.amount) FROM transactions t
+           WHERE t.container_id = c.id AND t.status != 'cancelled'), 0
+        )) as current_balance
       FROM containers c
       LEFT JOIN subjects s ON s.id = c.subject_id
       ORDER BY c.sort_order, c.name
@@ -109,7 +113,11 @@ async function handleContainers(event: HandlerEvent, id: string | null): RouteRe
 
   if (method === 'GET' && id) {
     const rows = await sql`
-      SELECT c.*, s.name as subject_name
+      SELECT c.*, s.name as subject_name,
+        (c.initial_balance + COALESCE(
+          (SELECT SUM(t.amount) FROM transactions t
+           WHERE t.container_id = c.id AND t.status != 'cancelled'), 0
+        )) as current_balance
       FROM containers c
       LEFT JOIN subjects s ON s.id = c.subject_id
       WHERE c.id = ${id}
@@ -124,13 +132,13 @@ async function handleContainers(event: HandlerEvent, id: string | null): RouteRe
     const rows = await sql`
       INSERT INTO containers (subject_id, name, type, provider, currency, is_multi_currency,
         initial_balance, billing_day, linked_container_id, goal_amount, goal_description,
-        icon, color, sort_order, is_active, notes)
+        icon, color, sort_order, is_pinned, is_active, notes)
       VALUES (${b.subjectId}, ${b.name}, ${b.type}, ${b.provider ?? null},
               ${b.currency ?? 'EUR'}, ${b.isMultiCurrency ?? false},
               ${b.initialBalance ?? '0'}, ${b.billingDay ?? null}, ${b.linkedContainerId ?? null},
               ${b.goalAmount ?? null}, ${b.goalDescription ?? null},
               ${b.icon ?? null}, ${b.color ?? null}, ${b.sortOrder ?? 0},
-              ${b.isActive ?? true}, ${b.notes ?? null})
+              ${b.isPinned ?? false}, ${b.isActive ?? true}, ${b.notes ?? null})
       RETURNING *
     `
     return created(rows[0])
@@ -140,20 +148,21 @@ async function handleContainers(event: HandlerEvent, id: string | null): RouteRe
     const b = parseBody<Record<string, unknown>>(event.body)
     const rows = await sql`
       UPDATE containers SET
-        subject_id = COALESCE(${b.subjectId ?? null}, subject_id),
+        subject_id = COALESCE(${b.subjectId ?? null}::uuid, subject_id),
         name = COALESCE(${b.name ?? null}, name),
         type = COALESCE(${b.type ?? null}, type),
-        provider = ${b.provider ?? null},
+        provider = COALESCE(${b.provider ?? null}, provider),
         currency = COALESCE(${b.currency ?? null}, currency),
-        is_multi_currency = COALESCE(${b.isMultiCurrency ?? null}, is_multi_currency),
+        is_multi_currency = COALESCE(${b.isMultiCurrency ?? null}::boolean, is_multi_currency),
         initial_balance = COALESCE(${b.initialBalance ?? null}::numeric, initial_balance),
-        billing_day = ${b.billingDay ?? null},
-        linked_container_id = ${b.linkedContainerId ?? null},
-        icon = ${b.icon ?? null},
-        color = ${b.color ?? null},
-        sort_order = COALESCE(${b.sortOrder ?? null}, sort_order),
-        is_active = COALESCE(${b.isActive ?? null}, is_active),
-        notes = ${b.notes ?? null},
+        billing_day = COALESCE(${b.billingDay ?? null}::integer, billing_day),
+        linked_container_id = COALESCE(${b.linkedContainerId ?? null}::uuid, linked_container_id),
+        icon = COALESCE(${b.icon ?? null}, icon),
+        color = COALESCE(${b.color ?? null}, color),
+        sort_order = COALESCE(${b.sortOrder ?? null}::integer, sort_order),
+        is_pinned = COALESCE(${b.isPinned ?? null}::boolean, is_pinned),
+        is_active = COALESCE(${b.isActive ?? null}::boolean, is_active),
+        notes = COALESCE(${b.notes ?? null}, notes),
         updated_at = NOW()
       WHERE id = ${id}
       RETURNING *
@@ -163,6 +172,12 @@ async function handleContainers(event: HandlerEvent, id: string | null): RouteRe
   }
 
   if (method === 'DELETE' && id) {
+    // Check for linked transactions first
+    const txCount = await sql`SELECT COUNT(*) as cnt FROM transactions WHERE container_id = ${id}`
+    const cnt = parseInt(txCount[0]?.cnt ?? '0')
+    if (cnt > 0) {
+      return badRequest(`Impossibile eliminare: ci sono ${cnt} transazioni collegate a questo contenitore.`)
+    }
     const rows = await sql`DELETE FROM containers WHERE id = ${id} RETURNING id`
     if (rows.length === 0) return notFound('Contenitore non trovato')
     return ok({ deleted: true, id })
@@ -678,13 +693,17 @@ async function handleBudget(event: HandlerEvent, path: string): RouteResult {
 async function handleStats(event: HandlerEvent): RouteResult {
   const sql = getDb()
 
-  // Total balance by currency (sum of initial_balance for active containers)
+  // Total balance by currency (initial_balance + transaction sums for active containers)
   const balances = await sql`
-    SELECT currency, SUM(initial_balance) as total
-    FROM containers
-    WHERE is_active = true
-    GROUP BY currency
-    ORDER BY currency
+    SELECT c.currency,
+      SUM(c.initial_balance + COALESCE(
+        (SELECT SUM(t.amount) FROM transactions t
+         WHERE t.container_id = c.id AND t.status != 'cancelled'), 0
+      )) as total
+    FROM containers c
+    WHERE c.is_active = true
+    GROUP BY c.currency
+    ORDER BY c.currency
   `
 
   // Monthly income/expenses (current month)
