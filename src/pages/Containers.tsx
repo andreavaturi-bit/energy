@@ -27,6 +27,7 @@ import {
   useCreateContainer,
   useUpdateContainer,
   useDeleteContainer,
+  useToggleContainerPin,
 } from '@/lib/hooks'
 import { containerTypeLabel, formatCurrency } from '@/lib/utils'
 
@@ -307,6 +308,7 @@ export function Containers() {
   const createContainer = useCreateContainer()
   const updateContainer = useUpdateContainer()
   const deleteContainer = useDeleteContainer()
+  const togglePin = useToggleContainerPin()
 
   const [showCreate, setShowCreate] = useState(false)
   const [editingContainer, setEditingContainer] = useState<Container | null>(null)
@@ -409,9 +411,9 @@ export function Containers() {
   // ------ handlers ------
 
   function handleTogglePin(container: Container) {
-    updateContainer.mutate({
+    togglePin.mutate({
       id: container.id,
-      data: { isPinned: !container.isPinned },
+      isPinned: !container.isPinned,
     })
   }
 

@@ -117,6 +117,30 @@ export function useUpdateContainer() {
   })
 }
 
+export function useToggleContainerPin() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, isPinned }: { id: string; isPinned: boolean }) =>
+      containersApi.update(id, { isPinned } as Partial<Container>),
+    onMutate: async ({ id, isPinned }) => {
+      await qc.cancelQueries({ queryKey: queryKeys.containers })
+      const previous = qc.getQueryData<Container[]>(queryKeys.containers)
+      qc.setQueryData<Container[]>(queryKeys.containers, (old) =>
+        old?.map((c) => (c.id === id ? { ...c, isPinned } : c)),
+      )
+      return { previous }
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) {
+        qc.setQueryData(queryKeys.containers, context.previous)
+      }
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.containers })
+    },
+  })
+}
+
 export function useDeleteContainer() {
   const qc = useQueryClient()
   return useMutation({

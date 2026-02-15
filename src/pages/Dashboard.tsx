@@ -164,7 +164,7 @@ export function Dashboard() {
 
       {/* 3. Container balances section */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* Left: Conti Principali - pinned or top 10 by balance */}
+        {/* Left: Conti Preferiti - pinned or top 10 by balance */}
         <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-6">
           <h2 className="mb-4 text-lg font-semibold text-zinc-100">
             Conti Preferiti
