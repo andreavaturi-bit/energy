@@ -365,7 +365,7 @@ async function handleTransactions(
     let query = sb
       .from('transactions')
       .select(
-        '*, containers(name, color, currency), counterparties(name), subjects!transactions_shared_with_subject_id_fk(name)',
+        '*, containers(name, color, currency), counterparties(name), subjects!transactions_shared_with_subject_id_subjects_id_fk(name)',
         { count: 'exact' },
       )
 
@@ -410,7 +410,7 @@ async function handleTransactions(
     const { data, error } = await sb
       .from('transactions')
       .select(
-        '*, containers(name, color), counterparties(name), subjects!transactions_shared_with_subject_id_fk(name)',
+        '*, containers(name, color), counterparties(name), subjects!transactions_shared_with_subject_id_subjects_id_fk(name)',
       )
       .eq('id', id)
       .single()
