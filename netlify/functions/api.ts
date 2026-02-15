@@ -738,14 +738,58 @@ async function handleStats(event: HandlerEvent): RouteResult {
 // MAIN ROUTER
 // ============================================================
 
+function cleanPath(rawPath: string): string {
+  // Handle both rewritten path (/.netlify/functions/api/...) and original path (/api/...)
+  let p = rawPath
+  if (p.startsWith('/.netlify/functions/api')) {
+    p = p.slice('/.netlify/functions/api'.length)
+  } else if (p.startsWith('/api')) {
+    p = p.slice('/api'.length)
+  }
+  return p || '/'
+}
+
 const handler: Handler = async (event) => {
   // CORS preflight
   if (event.httpMethod === 'OPTIONS') return cors()
 
-  // Strip function prefix to get clean path
-  const path = event.path.replace('/.netlify/functions/api', '') || '/'
+  const path = cleanPath(event.path)
 
   try {
+    // Health check endpoint - tests env vars + DB connectivity
+    if (path === '/health' || path === '/health/') {
+      const health: Record<string, unknown> = {
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        path: event.path,
+        cleanPath: path,
+        env: {
+          hasDatabaseUrl: !!process.env.DATABASE_URL,
+          databaseUrlPrefix: process.env.DATABASE_URL
+            ? process.env.DATABASE_URL.slice(0, 20) + '...'
+            : null,
+        },
+      }
+      // Try DB connectivity if DATABASE_URL is set
+      if (process.env.DATABASE_URL) {
+        try {
+          const sql = getDb()
+          const result = await sql`SELECT 1 as ping`
+          health.db = { connected: true, ping: result[0]?.ping }
+        } catch (dbErr) {
+          health.status = 'degraded'
+          health.db = {
+            connected: false,
+            error: dbErr instanceof Error ? dbErr.message : String(dbErr),
+          }
+        }
+      } else {
+        health.status = 'error'
+        health.db = { connected: false, error: 'DATABASE_URL not set' }
+      }
+      return json(health.status === 'ok' ? 200 : 503, health)
+    }
+
     // Route matching (order matters: more specific first)
     if (path.startsWith('/subjects')) {
       return await handleSubjects(event, extractId(path, 'subjects'))
@@ -772,7 +816,7 @@ const handler: Handler = async (event) => {
       return await handleStats(event)
     }
 
-    return notFound(`Nessun handler per: ${path}`)
+    return notFound(`Nessun handler per: ${path} (raw: ${event.path})`)
   } catch (err) {
     return serverError(err)
   }
