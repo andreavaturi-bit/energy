@@ -104,6 +104,7 @@ function TransactionModal({
   counterparties,
   subjects,
   isSaving,
+  saveError,
 }: {
   onClose: () => void
   onSave: (data: Record<string, unknown>) => void
@@ -112,6 +113,7 @@ function TransactionModal({
   counterparties: Counterparty[]
   subjects: Subject[]
   isSaving?: boolean
+  saveError?: string | null
 }) {
   const isEdit = !!existing
 
@@ -130,7 +132,7 @@ function TransactionModal({
   })
 
   function handleSave() {
-    if (!form.description.trim() || !form.amount || !form.containerId) return
+    if (!form.amount || !form.containerId) return
 
     const isOut = ['expense', 'transfer_out', 'capital_injection', 'loan_out', 'repayment_out'].includes(form.type)
     const rawAmt = parseFloat(form.amount)
@@ -138,7 +140,7 @@ function TransactionModal({
 
     const data: Record<string, unknown> = {
       date: form.date,
-      description: form.description,
+      description: form.description || null,
       amount: finalAmt.toFixed(2),
       currency: form.currency,
       containerId: form.containerId,
@@ -259,18 +261,26 @@ function TransactionModal({
           </div>
         </div>
 
-        <div className="flex justify-end gap-3 border-t border-zinc-800 px-6 py-4">
-          <button onClick={onClose} className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:border-zinc-600">
-            Annulla
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={!form.description.trim() || !form.amount || !form.containerId || isSaving}
-            className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
-            {isEdit ? 'Salva Modifiche' : 'Salva Transazione'}
-          </button>
+        <div className="border-t border-zinc-800 px-6 py-4 space-y-3">
+          {saveError && (
+            <div className="flex items-start gap-2 rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2">
+              <AlertCircle className="h-4 w-4 text-red-400 mt-0.5 shrink-0" />
+              <p className="text-xs text-red-400">{saveError}</p>
+            </div>
+          )}
+          <div className="flex justify-end gap-3">
+            <button onClick={onClose} className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:border-zinc-600">
+              Annulla
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={!form.amount || !form.containerId || isSaving}
+              className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+              {isEdit ? 'Salva Modifiche' : 'Salva Transazione'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -359,6 +369,9 @@ export function Transactions() {
       { onSuccess: () => setEditingTx(null) },
     )
   }
+
+  const createErrorMsg = createMutation.error instanceof Error ? createMutation.error.message : createMutation.error ? 'Errore nel salvataggio' : null
+  const updateErrorMsg = updateMutation.error instanceof Error ? updateMutation.error.message : updateMutation.error ? 'Errore nel salvataggio' : null
 
   function handleDeleteTx(id: string) {
     if (!confirm('Eliminare questa transazione?')) return
@@ -842,12 +855,13 @@ export function Transactions() {
       {/* ── Create Modal ─────────────────────────────────── */}
       {showCreate && (
         <TransactionModal
-          onClose={() => setShowCreate(false)}
+          onClose={() => { setShowCreate(false); createMutation.reset() }}
           onSave={handleCreateTx}
           containers={containers}
           counterparties={counterparties}
           subjects={subjects}
           isSaving={createMutation.isPending}
+          saveError={createErrorMsg}
         />
       )}
 
@@ -855,12 +869,13 @@ export function Transactions() {
       {editingTx && (
         <TransactionModal
           existing={editingTx}
-          onClose={() => setEditingTx(null)}
+          onClose={() => { setEditingTx(null); updateMutation.reset() }}
           onSave={handleUpdateTx}
           containers={containers}
           counterparties={counterparties}
           subjects={subjects}
           isSaving={updateMutation.isPending}
+          saveError={updateErrorMsg}
         />
       )}
     </div>
