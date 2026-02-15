@@ -2,8 +2,12 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
 
 export default async function handler(_req: VercelRequest, res: VercelResponse) {
-  const url = process.env.SUPABASE_URL || ''
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || ''
+  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || ''
+  const key =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    ''
 
   const health: Record<string, unknown> = {
     status: 'ok',
@@ -11,7 +15,7 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
     env: {
       SUPABASE_URL: url ? url.slice(0, 30) + '...' : '(NOT SET)',
       SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ? 'set ✓' : '(NOT SET)',
-      SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY ? 'set ✓' : '(NOT SET)',
+      SUPABASE_ANON_KEY: (process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) ? 'set ✓' : '(NOT SET)',
     },
     checks: {} as Record<string, unknown>,
   }
