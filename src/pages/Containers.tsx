@@ -364,7 +364,7 @@ export function Containers() {
     () =>
       filtered
         .filter((c) => c.currency === 'EUR')
-        .reduce((sum, c) => sum + parseFloat(c.initialBalance || '0'), 0),
+        .reduce((sum, c) => sum + parseFloat(c.currentBalance ?? c.initialBalance ?? '0'), 0),
     [filtered],
   )
 
@@ -372,7 +372,7 @@ export function Containers() {
     () =>
       filtered
         .filter((c) => c.currency === 'USD')
-        .reduce((sum, c) => sum + parseFloat(c.initialBalance || '0'), 0),
+        .reduce((sum, c) => sum + parseFloat(c.currentBalance ?? c.initialBalance ?? '0'), 0),
     [filtered],
   )
 
@@ -380,7 +380,7 @@ export function Containers() {
     () =>
       filtered
         .filter((c) => c.currency === 'RON')
-        .reduce((sum, c) => sum + parseFloat(c.initialBalance || '0'), 0),
+        .reduce((sum, c) => sum + parseFloat(c.currentBalance ?? c.initialBalance ?? '0'), 0),
     [filtered],
   )
 
@@ -535,7 +535,7 @@ export function Containers() {
               {/* Cards grid */}
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {group.containers.map((container) => {
-                  const balance = parseFloat(container.initialBalance || '0')
+                  const balance = parseFloat(container.currentBalance ?? container.initialBalance ?? '0')
                   const containerSubjectName = (container as Container & { subjectName?: string }).subjectName ?? subjectName(container.subjectId)
                   return (
                     <div
@@ -599,7 +599,7 @@ export function Containers() {
 
                       {/* Balance */}
                       <div className="mt-2">
-                        <p className="text-xs text-zinc-500">Saldo iniziale</p>
+                        <p className="text-xs text-zinc-500">Saldo</p>
                         <p
                           className={`text-xl font-bold ${
                             balance < 0 ? 'text-red-400' : 'text-zinc-100'

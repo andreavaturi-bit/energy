@@ -64,8 +64,8 @@ export function Dashboard() {
     .filter((c) => c.isActive)
     .sort(
       (a, b) =>
-        parseFloat(b.initialBalance || '0') -
-        parseFloat(a.initialBalance || '0'),
+        parseFloat(b.currentBalance ?? b.initialBalance ?? '0') -
+        parseFloat(a.currentBalance ?? a.initialBalance ?? '0'),
     )
     .slice(0, 10)
 
@@ -77,7 +77,7 @@ export function Dashboard() {
     for (const c of activeContainers) {
       const entry = typeMap.get(c.type) || { count: 0, total: 0 }
       entry.count += 1
-      entry.total += parseFloat(c.initialBalance || '0')
+      entry.total += parseFloat(c.currentBalance ?? c.initialBalance ?? '0')
       typeMap.set(c.type, entry)
     }
 
@@ -190,7 +190,7 @@ export function Dashboard() {
                     </div>
                   </div>
                   <p className="ml-4 whitespace-nowrap text-sm font-semibold text-zinc-100">
-                    {formatCurrency(c.initialBalance, c.currency)}
+                    {formatCurrency(c.currentBalance ?? c.initialBalance, c.currency)}
                   </p>
                 </div>
               )

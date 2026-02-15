@@ -37,7 +37,7 @@ export function AppLayout() {
             <Menu className="h-5 w-5" />
           </button>
           <h1 className="text-lg font-semibold tracking-tight">
-            eN<span className="text-energy-500">€</span>RGY
+            EN<span className="text-energy-500">€</span>RGY
           </h1>
         </header>
 

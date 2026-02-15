@@ -42,7 +42,7 @@ export function Sidebar({ onClose }: SidebarProps) {
         <div className="flex items-center gap-2">
           <Zap className="h-5 w-5 text-energy-500" />
           <h1 className="text-lg font-bold tracking-tight">
-            eN<span className="text-energy-500">€</span>RGY
+            EN<span className="text-energy-500">€</span>RGY
           </h1>
         </div>
         <button

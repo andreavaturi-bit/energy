@@ -114,10 +114,30 @@ async function handleContainers(
       .order('sort_order')
       .order('name')
     if (error) throw error
-    // Flatten: subjects.name → subject_name
+
+    // Fetch transaction sums per container (non-cancelled)
+    const { data: txSums } = await sb
+      .from('transactions')
+      .select('container_id, amount')
+      .neq('status', 'cancelled')
+
+    const sumMap = new Map<string, number>()
+    for (const t of txSums || []) {
+      const cid = t.container_id as string
+      const amt = parseFloat(t.amount as string) || 0
+      sumMap.set(cid, (sumMap.get(cid) || 0) + amt)
+    }
+
+    // Flatten: subjects.name → subject_name, add current_balance
     const rows = (data || []).map((r: Record<string, unknown>) => {
       const { subjects, ...rest } = r as Record<string, unknown> & { subjects?: { name: string } }
-      return { ...rest, subject_name: subjects?.name ?? null }
+      const initialBal = parseFloat(rest.initial_balance as string) || 0
+      const txSum = sumMap.get(rest.id as string) || 0
+      return {
+        ...rest,
+        subject_name: subjects?.name ?? null,
+        current_balance: (initialBal + txSum).toFixed(4),
+      }
     })
     return ok(res, rows)
   }
@@ -834,17 +854,35 @@ async function handleStats(
 ) {
   const sb = getSupabase()
 
-  // 1) Balances by currency (active containers)
+  // 1) Balances by currency (active containers + their transactions)
   const { data: containers } = await sb
     .from('containers')
-    .select('currency, initial_balance')
+    .select('id, currency, initial_balance')
     .eq('is_active', true)
+
+  // Fetch transaction sums per container (non-cancelled)
+  const activeIds = (containers || []).map((c) => c.id as string)
+  const { data: txSums } = activeIds.length > 0
+    ? await sb
+        .from('transactions')
+        .select('container_id, amount')
+        .in('container_id', activeIds)
+        .neq('status', 'cancelled')
+    : { data: [] }
+
+  const txSumMap = new Map<string, number>()
+  for (const t of txSums || []) {
+    const cid = t.container_id as string
+    const amt = parseFloat(t.amount as string) || 0
+    txSumMap.set(cid, (txSumMap.get(cid) || 0) + amt)
+  }
 
   const balanceMap = new Map<string, number>()
   for (const c of containers || []) {
     const cur = c.currency as string
-    const bal = parseFloat(c.initial_balance as string) || 0
-    balanceMap.set(cur, (balanceMap.get(cur) || 0) + bal)
+    const initialBal = parseFloat(c.initial_balance as string) || 0
+    const txSum = txSumMap.get(c.id as string) || 0
+    balanceMap.set(cur, (balanceMap.get(cur) || 0) + initialBal + txSum)
   }
   const balances = Array.from(balanceMap.entries()).map(([currency, total]) => ({
     currency,
