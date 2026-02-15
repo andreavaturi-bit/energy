@@ -7,7 +7,7 @@ import {
   badRequest,
   notFound,
   serverError,
-} from './_lib/supabase'
+} from './_lib/supabase.js'
 
 // ── Utility ─────────────────────────────────────────────────
 
