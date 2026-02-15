@@ -938,13 +938,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   setCors(res)
   if (req.method === 'OPTIONS') return res.status(204).end()
 
-  // Extract path segments from catch-all
+  // Extract path segments from catch-all query param
   const pathParam = req.query.path
-  const segments: string[] = Array.isArray(pathParam)
-    ? pathParam
-    : pathParam
-      ? [pathParam]
-      : []
+  let segments: string[]
+
+  if (pathParam) {
+    segments = Array.isArray(pathParam) ? pathParam : [pathParam]
+  } else {
+    // Fallback: parse from req.url (needed for non-Next.js Vercel projects
+    // where req.query.path may not be populated by the catch-all route)
+    const url = req.url || ''
+    const pathPart = url.split('?')[0]
+    const apiPath = pathPart.replace(/^\/api\/?/, '')
+    segments = apiPath ? apiPath.split('/').filter(Boolean) : []
+  }
 
   const resource = segments[0] || ''
 
@@ -966,6 +973,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return await handleBudget(req, res, segments)
       case 'stats':
         return await handleStats(req, res)
+      case 'health':
+        return res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() })
+      case '':
+        return res.status(200).json({
+          status: 'ok',
+          endpoints: ['subjects', 'containers', 'counterparties', 'tags', 'transactions', 'recurrences', 'budget', 'stats', 'health'],
+        })
       default:
         return res.status(404).json({ error: 'Not Found', message: `Nessun handler per: /${segments.join('/')}` })
     }
