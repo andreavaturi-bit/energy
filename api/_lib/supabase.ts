@@ -1,47 +1,25 @@
-import { neon, type NeonQueryFunction } from '@neondatabase/serverless'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import type { VercelResponse } from '@vercel/node'
 
-let _sql: NeonQueryFunction<false, false> | null = null
+let _supabase: SupabaseClient | null = null
 
 /**
- * Returns a Neon SQL tagged-template function.
- * Requires DATABASE_URL env var.
+ * Returns a Supabase client (reused within invocation).
+ * Accepts SUPABASE_SERVICE_ROLE_KEY (preferred) or SUPABASE_ANON_KEY.
+ * Both work when RLS is not enabled on the tables.
  */
-export function getDb() {
-  if (_sql) return _sql
-  const url = process.env.DATABASE_URL
-  if (!url) {
-    throw new Error('DATABASE_URL environment variable is not set')
+export function getSupabase(): SupabaseClient {
+  if (_supabase) return _supabase
+  const url = process.env.SUPABASE_URL
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
+  if (!url || !key) {
+    throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_ANON_KEY) are not set')
   }
-  _sql = neon(url)
-  return _sql
+  _supabase = createClient(url, key)
+  return _supabase
 }
 
-/**
- * Parse a JSON body string.
- */
-export function parseBody<T = Record<string, unknown>>(body: string | null): T {
-  if (!body) return {} as T
-  try {
-    return JSON.parse(body) as T
-  } catch {
-    return {} as T
-  }
-}
-
-/**
- * Extract resource ID from path like /transactions/abc-123
- */
-export function extractId(path: string, resource: string): string | null {
-  const prefix = `/${resource}/`
-  const idx = path.indexOf(prefix)
-  if (idx === -1) return null
-  const rest = path.slice(idx + prefix.length)
-  const id = rest.split('/')[0]
-  return id || null
-}
-
-// ── Response helpers (Vercel format) ────────────────────────
+// ── Response helpers ────────────────────────────────────────
 
 export function setCors(res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*')
@@ -55,6 +33,10 @@ export function ok(res: VercelResponse, data: unknown) {
 
 export function created(res: VercelResponse, data: unknown) {
   return res.status(201).json({ data })
+}
+
+export function noContent(res: VercelResponse) {
+  return res.status(204).end()
 }
 
 export function badRequest(res: VercelResponse, message: string) {
