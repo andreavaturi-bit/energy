@@ -1,4 +1,3 @@
-import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Wallet,
@@ -14,14 +13,11 @@ import {
   PiggyBank,
   Bitcoin,
   Ticket,
+  Loader2,
+  AlertCircle,
 } from 'lucide-react'
 import { StatCard } from '@/components/ui/StatCard'
-import {
-  CONTAINERS,
-  TRANSACTIONS,
-  getSubject,
-  getContainer,
-} from '@/lib/mockData'
+import { useDashboardStats, useContainers, useSubjects } from '@/lib/hooks'
 import {
   formatCurrency,
   formatDate,
@@ -44,84 +40,38 @@ const containerTypeIcons: Record<ContainerType, React.ComponentType<{ className?
 }
 
 export function Dashboard() {
-  // Today's date in Italian format (e.g. "venerdi 7 febbraio 2026")
   const todayFormatted = formatDate(new Date(), "EEEE d MMMM yyyy")
 
-  // -----------------------------------------------------------
-  // 2. Summary stats computed from mock data
-  // -----------------------------------------------------------
-  const stats = useMemo(() => {
-    // Patrimonio Totale: sum of all active EUR container initialBalances
-    const patrimonio = CONTAINERS
-      .filter((c) => c.isActive && c.currency === 'EUR')
-      .reduce((sum, c) => sum + parseFloat(c.initialBalance || '0'), 0)
+  const { data: stats, isLoading: statsLoading, error: statsError } = useDashboardStats()
+  const { data: containers = [], isLoading: containersLoading } = useContainers()
+  const { data: subjects = [] } = useSubjects()
 
-    // Determine the "current month" from the most recent transaction
-    const sorted = [...TRANSACTIONS].sort((a, b) =>
-      b.date.localeCompare(a.date),
+  const isLoading = statsLoading || containersLoading
+
+  // Patrimonio from balances
+  const patrimonio = stats?.balances
+    ?.filter((b) => b.currency === 'EUR')
+    .reduce((sum, b) => sum + parseFloat(b.total), 0) ?? 0
+
+  const entrateMese = stats?.monthly?.monthlyIncome ?? 0
+  const usciteMese = stats?.monthly?.monthlyExpenses ?? 0
+  const nettoMese = entrateMese - usciteMese
+  const creditiPendenti = stats?.pending?.pendingCredits ?? 0
+  const debitiPendenti = stats?.pending?.pendingDebits ?? 0
+
+  // Top containers by balance
+  const topContainers = [...containers]
+    .filter((c) => c.isActive)
+    .sort(
+      (a, b) =>
+        parseFloat(b.initialBalance || '0') -
+        parseFloat(a.initialBalance || '0'),
     )
-    const currentMonth = (sorted[0]?.date ?? new Date().toISOString().slice(0, 10)).slice(0, 7)
+    .slice(0, 10)
 
-    // All transactions in the current month (excluding cancelled)
-    const monthlyTx = TRANSACTIONS.filter(
-      (t) => t.date.startsWith(currentMonth) && t.status !== 'cancelled',
-    )
-
-    // Entrate Mese: income transactions only
-    const entrateMese = monthlyTx
-      .filter((t) => t.type === 'income')
-      .reduce((sum, t) => sum + parseFloat(t.amount), 0)
-
-    // Uscite Mese: expense transactions only (absolute value)
-    const usciteMese = monthlyTx
-      .filter((t) => t.type === 'expense')
-      .reduce((sum, t) => sum + Math.abs(parseFloat(t.amount)), 0)
-
-    // Netto Mese
-    const nettoMese = entrateMese - usciteMese
-
-    // Pending transactions
-    const pendingTx = TRANSACTIONS.filter((t) => t.status === 'pending')
-
-    const creditiPendenti = pendingTx
-      .filter((t) => isInflow(t.type))
-      .reduce((sum, t) => sum + parseFloat(t.amount), 0)
-
-    const debitiPendenti = pendingTx
-      .filter((t) => !isInflow(t.type))
-      .reduce((sum, t) => sum + Math.abs(parseFloat(t.amount)), 0)
-
-    return {
-      patrimonio,
-      entrateMese,
-      usciteMese,
-      nettoMese,
-      creditiPendenti,
-      debitiPendenti,
-    }
-  }, [])
-
-  // -----------------------------------------------------------
-  // 3a. Top 10 containers by balance (descending)
-  // -----------------------------------------------------------
-  const topContainers = useMemo(
-    () =>
-      [...CONTAINERS]
-        .filter((c) => c.isActive)
-        .sort(
-          (a, b) =>
-            parseFloat(b.initialBalance || '0') -
-            parseFloat(a.initialBalance || '0'),
-        )
-        .slice(0, 10),
-    [],
-  )
-
-  // -----------------------------------------------------------
-  // 3b. Summary by container type
-  // -----------------------------------------------------------
-  const typeSummary = useMemo(() => {
-    const activeContainers = CONTAINERS.filter((c) => c.isActive)
+  // Type summary
+  const typeSummary = (() => {
+    const activeContainers = containers.filter((c) => c.isActive)
     const typeMap = new Map<ContainerType, { count: number; total: number }>()
 
     for (const c of activeContainers) {
@@ -134,18 +84,35 @@ export function Dashboard() {
     return Array.from(typeMap.entries())
       .map(([type, data]) => ({ type, ...data }))
       .sort((a, b) => b.total - a.total)
-  }, [])
+  })()
 
-  // -----------------------------------------------------------
-  // 4. Last 8 transactions (by date descending)
-  // -----------------------------------------------------------
-  const recentTransactions = useMemo(
-    () =>
-      [...TRANSACTIONS]
-        .sort((a, b) => b.date.localeCompare(a.date))
-        .slice(0, 8),
-    [],
-  )
+  // Recent transactions from stats
+  const recentTransactions = stats?.recentTransactions ?? []
+
+  function getSubjectName(subjectId: string): string | undefined {
+    return subjects.find((s) => s.id === subjectId)?.name
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="h-8 w-8 animate-spin text-energy-400" />
+        <span className="ml-3 text-zinc-400">Caricamento dashboard...</span>
+      </div>
+    )
+  }
+
+  if (statsError) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-zinc-400">
+        <AlertCircle className="h-8 w-8 text-red-400 mb-3" />
+        <p className="text-sm">Errore nel caricamento dei dati.</p>
+        <p className="text-xs text-zinc-500 mt-1">
+          {statsError instanceof Error ? statsError.message : 'Errore sconosciuto'}
+        </p>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -161,32 +128,32 @@ export function Dashboard() {
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
         <StatCard
           title="Patrimonio Totale"
-          value={formatCurrency(stats.patrimonio)}
+          value={formatCurrency(patrimonio)}
           icon={Wallet}
         />
         <StatCard
           title="Entrate Mese"
-          value={formatCurrency(stats.entrateMese)}
+          value={formatCurrency(entrateMese)}
           icon={TrendingUp}
         />
         <StatCard
           title="Uscite Mese"
-          value={formatCurrency(stats.usciteMese)}
+          value={formatCurrency(usciteMese)}
           icon={TrendingDown}
         />
         <StatCard
           title="Netto Mese"
-          value={formatCurrency(stats.nettoMese)}
+          value={formatCurrency(nettoMese)}
           icon={ArrowUpDown}
         />
         <StatCard
           title="Crediti Pendenti"
-          value={formatCurrency(stats.creditiPendenti)}
+          value={formatCurrency(creditiPendenti)}
           icon={Clock}
         />
         <StatCard
           title="Debiti Pendenti"
-          value={formatCurrency(stats.debitiPendenti)}
+          value={formatCurrency(debitiPendenti)}
           icon={Clock}
         />
       </div>
@@ -200,7 +167,7 @@ export function Dashboard() {
           </h2>
           <div className="space-y-2">
             {topContainers.map((c) => {
-              const subject = getSubject(c.subjectId)
+              const subjectName = getSubjectName(c.subjectId)
               return (
                 <div
                   key={c.id}
@@ -215,9 +182,9 @@ export function Dashboard() {
                       <p className="truncate text-sm font-medium text-zinc-200">
                         {c.name}
                       </p>
-                      {subject && (
+                      {subjectName && (
                         <p className="truncate text-xs text-zinc-500">
-                          {subject.name}
+                          {subjectName}
                         </p>
                       )}
                     </div>
@@ -228,6 +195,9 @@ export function Dashboard() {
                 </div>
               )
             })}
+            {topContainers.length === 0 && (
+              <p className="text-sm text-zinc-500 py-4 text-center">Nessun contenitore trovato</p>
+            )}
           </div>
         </div>
 
@@ -293,10 +263,13 @@ export function Dashboard() {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/50">
-              {recentTransactions.map((tx) => {
-                const container = getContainer(tx.containerId)
+              {recentTransactions.slice(0, 8).map((tx) => {
                 const amount = parseFloat(tx.amount)
                 const inflow = isInflow(tx.type)
+                // The API flattens container info into the transaction object
+                const txAny = tx as unknown as Record<string, unknown>
+                const cName = (txAny.containerName as string) ?? '\u2014'
+                const cColor = (txAny.containerColor as string) ?? '#71717A'
                 return (
                   <tr key={tx.id} className="text-sm">
                     <td className="whitespace-nowrap py-3 pr-4 text-zinc-400">
@@ -309,12 +282,10 @@ export function Dashboard() {
                       <div className="flex items-center gap-2">
                         <div
                           className="h-2.5 w-2.5 shrink-0 rounded-full"
-                          style={{
-                            backgroundColor: container?.color || '#71717A',
-                          }}
+                          style={{ backgroundColor: cColor }}
                         />
                         <span className="truncate text-zinc-400">
-                          {container?.name ?? '\u2014'}
+                          {cName}
                         </span>
                       </div>
                     </td>
@@ -329,6 +300,13 @@ export function Dashboard() {
                   </tr>
                 )
               })}
+              {recentTransactions.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="py-8 text-center text-sm text-zinc-500">
+                    Nessuna transazione recente
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

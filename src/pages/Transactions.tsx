@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useCallback } from 'react'
 import {
   useReactTable,
   getCoreRowModel,
@@ -21,9 +21,19 @@ import {
   X,
   Pencil,
   Trash2,
+  Loader2,
+  AlertCircle,
 } from 'lucide-react'
-import type { Transaction, TransactionType, TransactionStatus } from '@/types'
-import { TRANSACTIONS, CONTAINERS, COUNTERPARTIES, SUBJECTS } from '@/lib/mockData'
+import type { Transaction, TransactionType, TransactionStatus, Container, Counterparty, Subject } from '@/types'
+import {
+  useTransactions,
+  useContainers,
+  useCounterparties,
+  useSubjects,
+  useCreateTransaction,
+  useUpdateTransaction,
+  useDeleteTransaction,
+} from '@/lib/hooks'
 import {
   formatCurrency,
   formatDate,
@@ -31,21 +41,6 @@ import {
   transactionTypeColor,
   isInflow,
 } from '@/lib/utils'
-
-// ── Lookup helpers ──────────────────────────────────────────
-
-function containerName(id: string): string {
-  return CONTAINERS.find((c) => c.id === id)?.name ?? '—'
-}
-
-function containerColor(id: string): string | null {
-  return CONTAINERS.find((c) => c.id === id)?.color ?? null
-}
-
-function counterpartyName(id: string | null | undefined): string {
-  if (!id) return '—'
-  return COUNTERPARTIES.find((c) => c.id === id)?.name ?? '—'
-}
 
 // ── Status badge styling ────────────────────────────────────
 
@@ -105,10 +100,18 @@ function TransactionModal({
   onClose,
   onSave,
   existing,
+  containers,
+  counterparties,
+  subjects,
+  isSaving,
 }: {
   onClose: () => void
-  onSave: (tx: Transaction) => void
+  onSave: (data: Record<string, unknown>) => void
   existing?: Transaction | null
+  containers: Container[]
+  counterparties: Counterparty[]
+  subjects: Subject[]
+  isSaving?: boolean
 }) {
   const isEdit = !!existing
 
@@ -117,7 +120,7 @@ function TransactionModal({
     description: existing?.description ?? '',
     amount: existing ? String(Math.abs(parseFloat(existing.amount))) : '',
     currency: existing?.currency ?? 'EUR',
-    containerId: existing?.containerId ?? (CONTAINERS[0]?.id ?? ''),
+    containerId: existing?.containerId ?? (containers[0]?.id ?? ''),
     counterpartyId: existing?.counterpartyId ?? '',
     type: (existing?.type ?? 'expense') as TransactionType,
     status: (existing?.status ?? 'completed') as TransactionStatus,
@@ -133,9 +136,7 @@ function TransactionModal({
     const rawAmt = parseFloat(form.amount)
     const finalAmt = isOut && rawAmt > 0 ? -rawAmt : rawAmt
 
-    const tx: Transaction = {
-      ...(existing ?? {}),
-      id: existing?.id ?? `tx-${Date.now()}`,
+    const data: Record<string, unknown> = {
       date: form.date,
       description: form.description,
       amount: finalAmt.toFixed(2),
@@ -148,10 +149,8 @@ function TransactionModal({
       notes: form.notes || null,
       sharedWithSubjectId: form.sharedWithSubjectId || null,
       sharePercentage: form.sharePercentage || null,
-      createdAt: existing?.createdAt ?? new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
     }
-    onSave(tx)
+    onSave(data)
   }
 
   const inputCls = 'w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500'
@@ -209,7 +208,7 @@ function TransactionModal({
           <div>
             <label className={labelCls}>Contenitore *</label>
             <select value={form.containerId} onChange={(e) => setForm({ ...form, containerId: e.target.value })} className={inputCls}>
-              {CONTAINERS.filter((c) => c.isActive).map((c) => (
+              {containers.filter((c) => c.isActive).map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
@@ -220,7 +219,7 @@ function TransactionModal({
             <label className={labelCls}>Controparte</label>
             <select value={form.counterpartyId} onChange={(e) => setForm({ ...form, counterpartyId: e.target.value })} className={inputCls}>
               <option value="">— Nessuna —</option>
-              {COUNTERPARTIES.map((c) => (
+              {counterparties.map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
@@ -240,7 +239,7 @@ function TransactionModal({
               <label className={labelCls}>Condiviso con</label>
               <select value={form.sharedWithSubjectId} onChange={(e) => setForm({ ...form, sharedWithSubjectId: e.target.value })} className={inputCls}>
                 <option value="">— Nessuno —</option>
-                {SUBJECTS.filter((s) => s.role === 'partner').map((s) => (
+                {subjects.filter((s) => s.role === 'partner').map((s) => (
                   <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
               </select>
@@ -266,9 +265,10 @@ function TransactionModal({
           </button>
           <button
             onClick={handleSave}
-            disabled={!form.description.trim() || !form.amount || !form.containerId}
-            className="rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            disabled={!form.description.trim() || !form.amount || !form.containerId || isSaving}
+            className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
+            {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
             {isEdit ? 'Salva Modifiche' : 'Salva Transazione'}
           </button>
         </div>
@@ -280,15 +280,8 @@ function TransactionModal({
 // ── Component ───────────────────────────────────────────────
 
 export function Transactions() {
-  // Local transactions state (so new ones appear)
-  const [transactions, setTransactions] = useState<Transaction[]>(TRANSACTIONS)
   const [showCreate, setShowCreate] = useState(false)
   const [editingTx, setEditingTx] = useState<Transaction | null>(null)
-
-  function handleDeleteTx(id: string) {
-    if (!confirm('Eliminare questa transazione?')) return
-    setTransactions((prev) => prev.filter((t) => t.id !== id))
-  }
 
   // Filter state
   const [searchText, setSearchText] = useState('')
@@ -304,52 +297,80 @@ export function Transactions() {
   ])
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
 
-  // ── Pre-filter data based on filter-bar controls ──────────
-  const filteredData = useMemo(() => {
-    let data = [...transactions]
-
-    // Text search (description + notes)
-    if (searchText) {
-      const q = searchText.toLowerCase()
-      data = data.filter(
-        (tx) =>
-          (tx.description ?? '').toLowerCase().includes(q) ||
-          (tx.notes ?? '').toLowerCase().includes(q),
-      )
+  // ── Build API query params from filter state ───────────────
+  const queryParams = useMemo(() => {
+    const params: Record<string, string> = {
+      limit: '500',
+      offset: '0',
     }
+    if (searchText) params.search = searchText
+    if (dateFrom) params.dateFrom = dateFrom
+    if (dateTo) params.dateTo = dateTo
+    if (containerId) params.containerId = containerId
+    if (typeFilter) params.type = typeFilter
+    if (statusFilter) params.status = statusFilter
+    return params
+  }, [searchText, dateFrom, dateTo, containerId, typeFilter, statusFilter])
 
-    // Date range
-    if (dateFrom) {
-      data = data.filter((tx) => tx.date >= dateFrom)
-    }
-    if (dateTo) {
-      data = data.filter((tx) => tx.date <= dateTo)
-    }
+  // ── Data hooks ─────────────────────────────────────────────
+  const { data: txData, isLoading: txLoading, error: txError } = useTransactions(queryParams)
+  const { data: containers = [], isLoading: containersLoading } = useContainers()
+  const { data: counterparties = [], isLoading: counterpartiesLoading } = useCounterparties()
+  const { data: subjects = [] } = useSubjects()
 
-    // Container
-    if (containerId) {
-      data = data.filter((tx) => tx.containerId === containerId)
-    }
+  // ── Mutation hooks ─────────────────────────────────────────
+  const createMutation = useCreateTransaction()
+  const updateMutation = useUpdateTransaction()
+  const deleteMutation = useDeleteTransaction()
 
-    // Type
-    if (typeFilter) {
-      data = data.filter((tx) => tx.type === typeFilter)
-    }
+  const transactions = txData?.rows ?? []
+  const totalCount = txData?.total ?? 0
 
-    // Status
-    if (statusFilter) {
-      data = data.filter((tx) => tx.status === statusFilter)
-    }
+  // ── Lookup helpers ─────────────────────────────────────────
+  const containerName = useCallback(
+    (id: string): string => containers.find((c) => c.id === id)?.name ?? '—',
+    [containers],
+  )
 
-    return data
-  }, [transactions, searchText, dateFrom, dateTo, containerId, typeFilter, statusFilter])
+  const containerColor = useCallback(
+    (id: string): string | null => containers.find((c) => c.id === id)?.color ?? null,
+    [containers],
+  )
+
+  const counterpartyName = useCallback(
+    (id: string | null | undefined): string => {
+      if (!id) return '—'
+      return counterparties.find((c) => c.id === id)?.name ?? '—'
+    },
+    [counterparties],
+  )
+
+  // ── CRUD handlers ──────────────────────────────────────────
+  function handleCreateTx(data: Record<string, unknown>) {
+    createMutation.mutate(data as Partial<Transaction>, {
+      onSuccess: () => setShowCreate(false),
+    })
+  }
+
+  function handleUpdateTx(data: Record<string, unknown>) {
+    if (!editingTx) return
+    updateMutation.mutate(
+      { id: editingTx.id, data: data as Partial<Transaction> },
+      { onSuccess: () => setEditingTx(null) },
+    )
+  }
+
+  function handleDeleteTx(id: string) {
+    if (!confirm('Eliminare questa transazione?')) return
+    deleteMutation.mutate(id)
+  }
 
   // ── Summary calculations ──────────────────────────────────
   const summary = useMemo(() => {
     let income = 0
     let expenses = 0
 
-    for (const tx of filteredData) {
+    for (const tx of transactions) {
       const amt = parseFloat(tx.amount)
       if (isNaN(amt)) continue
       if (amt > 0) income += amt
@@ -360,10 +381,10 @@ export function Transactions() {
       income,
       expenses,
       net: income + expenses,
-      filteredCount: filteredData.length,
-      totalCount: transactions.length,
+      filteredCount: transactions.length,
+      totalCount,
     }
-  }, [filteredData, transactions.length])
+  }, [transactions, totalCount])
 
   // ── Has any active filter ─────────────────────────────────
   const hasFilters =
@@ -502,12 +523,12 @@ export function Transactions() {
         ),
       },
     ],
-    [],
+    [containerName, containerColor, counterpartyName],
   )
 
   // ── Table instance ────────────────────────────────────────
   const table = useReactTable({
-    data: filteredData,
+    data: transactions,
     columns,
     state: {
       sorting,
@@ -531,11 +552,35 @@ export function Transactions() {
 
   // ── Unique containers used in transactions for dropdown ───
   const containerOptions = useMemo(() => {
-    const ids = new Set(transactions.map((t) => t.containerId))
-    return CONTAINERS.filter((c) => ids.has(c.id)).sort((a, b) =>
-      a.name.localeCompare(b.name),
+    return [...containers].sort((a, b) => a.name.localeCompare(b.name))
+  }, [containers])
+
+  // ── Loading state ──────────────────────────────────────────
+  const isLoading = txLoading || containersLoading || counterpartiesLoading
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-32">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="h-8 w-8 animate-spin text-energy-500" />
+          <p className="text-sm text-zinc-400">Caricamento transazioni...</p>
+        </div>
+      </div>
     )
-  }, [transactions])
+  }
+
+  // ── Error state ────────────────────────────────────────────
+  if (txError) {
+    return (
+      <div className="flex items-center justify-center py-32">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <AlertCircle className="h-8 w-8 text-red-400" />
+          <p className="text-sm text-red-400">Errore nel caricamento delle transazioni</p>
+          <p className="text-xs text-zinc-500">{txError instanceof Error ? txError.message : 'Errore sconosciuto'}</p>
+        </div>
+      </div>
+    )
+  }
 
   // ── Render ────────────────────────────────────────────────
   return (
@@ -798,10 +843,11 @@ export function Transactions() {
       {showCreate && (
         <TransactionModal
           onClose={() => setShowCreate(false)}
-          onSave={(tx) => {
-            setTransactions((prev) => [tx, ...prev])
-            setShowCreate(false)
-          }}
+          onSave={handleCreateTx}
+          containers={containers}
+          counterparties={counterparties}
+          subjects={subjects}
+          isSaving={createMutation.isPending}
         />
       )}
 
@@ -810,10 +856,11 @@ export function Transactions() {
         <TransactionModal
           existing={editingTx}
           onClose={() => setEditingTx(null)}
-          onSave={(tx) => {
-            setTransactions((prev) => prev.map((t) => t.id === tx.id ? tx : t))
-            setEditingTx(null)
-          }}
+          onSave={handleUpdateTx}
+          containers={containers}
+          counterparties={counterparties}
+          subjects={subjects}
+          isSaving={updateMutation.isPending}
         />
       )}
     </div>

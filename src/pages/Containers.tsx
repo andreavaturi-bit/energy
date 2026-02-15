@@ -14,9 +14,17 @@ import {
   Globe,
   CircleDot,
   X,
+  Loader2,
+  AlertCircle,
 } from 'lucide-react'
 import type { ContainerType, Container } from '@/types'
-import { CONTAINERS, SUBJECTS } from '@/lib/mockData'
+import {
+  useContainers,
+  useSubjects,
+  useCreateContainer,
+  useUpdateContainer,
+  useDeleteContainer,
+} from '@/lib/hooks'
 import { containerTypeLabel, formatCurrency } from '@/lib/utils'
 
 // ---------------------------------------------------------------------------
@@ -61,10 +69,6 @@ const COLORS = [
 // Helpers
 // ---------------------------------------------------------------------------
 
-function subjectName(subjectId: string): string {
-  return SUBJECTS.find((s) => s.id === subjectId)?.name ?? subjectId
-}
-
 type Grouping = 'type' | 'subject'
 
 // ---------------------------------------------------------------------------
@@ -72,16 +76,20 @@ type Grouping = 'type' | 'subject'
 // ---------------------------------------------------------------------------
 
 function ContainerModal({
+  subjects,
   onClose,
   onSave,
+  isSaving,
 }: {
+  subjects: { id: string; name: string }[]
   onClose: () => void
-  onSave: (c: Container) => void
+  onSave: (data: Partial<Container>) => void
+  isSaving: boolean
 }) {
   const [form, setForm] = useState({
     name: '',
     type: 'bank_account' as ContainerType,
-    subjectId: SUBJECTS[0]?.id ?? '',
+    subjectId: subjects[0]?.id ?? '',
     provider: '',
     currency: 'EUR',
     initialBalance: '0',
@@ -95,8 +103,7 @@ function ContainerModal({
   function handleSave() {
     if (!form.name.trim() || !form.subjectId) return
 
-    const container: Container = {
-      id: `c-${Date.now()}`,
+    onSave({
       subjectId: form.subjectId,
       name: form.name.trim(),
       type: form.type,
@@ -113,10 +120,7 @@ function ContainerModal({
       sortOrder: 999,
       isActive: form.isActive,
       notes: form.notes || null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    }
-    onSave(container)
+    })
   }
 
   const inputCls = 'w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500'
@@ -152,7 +156,7 @@ function ContainerModal({
             <div>
               <label className={labelCls}>Soggetto *</label>
               <select value={form.subjectId} onChange={(e) => setForm({ ...form, subjectId: e.target.value })} className={inputCls}>
-                {SUBJECTS.map((s) => (
+                {subjects.map((s) => (
                   <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
               </select>
@@ -258,10 +262,17 @@ function ContainerModal({
           </button>
           <button
             onClick={handleSave}
-            disabled={!form.name.trim() || !form.subjectId}
+            disabled={!form.name.trim() || !form.subjectId || isSaving}
             className="rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            Salva Contenitore
+            {isSaving ? (
+              <span className="flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Salvataggio...
+              </span>
+            ) : (
+              'Salva Contenitore'
+            )}
           </button>
         </div>
       </div>
@@ -274,12 +285,24 @@ function ContainerModal({
 // ---------------------------------------------------------------------------
 
 export function Containers() {
-  const [containers, setContainers] = useState<Container[]>(CONTAINERS)
+  const { data: containers = [], isLoading: containersLoading, error: containersError } = useContainers()
+  const { data: subjects = [], isLoading: subjectsLoading } = useSubjects()
+  const createContainer = useCreateContainer()
+  const updateContainer = useUpdateContainer()
+  const deleteContainer = useDeleteContainer()
+
   const [showCreate, setShowCreate] = useState(false)
   const [search, setSearch] = useState('')
   const [subjectFilter, setSubjectFilter] = useState<string>('all')
   const [showInactive, setShowInactive] = useState(false)
   const [grouping, setGrouping] = useState<Grouping>('type')
+
+  const isLoading = containersLoading || subjectsLoading
+
+  // Helper: get subject name from subjects list
+  function subjectName(subjectId: string): string {
+    return subjects.find((s) => s.id === subjectId)?.name ?? subjectId
+  }
 
   // ------ filtered list ------
   const filtered = useMemo(() => {
@@ -301,7 +324,7 @@ export function Containers() {
   // ------ grouped data ------
   const groups = useMemo(() => {
     if (grouping === 'type') {
-      const map = new Map<ContainerType, Container[]>()
+      const map = new Map<ContainerType, (Container & { subjectName?: string })[]>()
       for (const c of filtered) {
         const list = map.get(c.type) ?? []
         list.push(c)
@@ -317,9 +340,9 @@ export function Containers() {
     }
 
     // grouping === 'subject'
-    const map = new Map<string, Container[]>()
+    const map = new Map<string, (Container & { subjectName?: string })[]>()
     for (const c of filtered) {
-      const name = subjectName(c.subjectId)
+      const name = (c as Container & { subjectName?: string }).subjectName ?? subjectName(c.subjectId)
       const list = map.get(name) ?? []
       list.push(c)
       map.set(name, list)
@@ -332,7 +355,7 @@ export function Containers() {
         Icon: null as (typeof Landmark) | null,
         containers: ctrs,
       }))
-  }, [filtered, grouping])
+  }, [filtered, grouping, subjects])
 
   // ------ summary totals ------
   const totalCount = filtered.length
@@ -361,8 +384,43 @@ export function Containers() {
     [filtered],
   )
 
-  // header total – combine EUR prominently
+  // header total -- combine EUR prominently
   const headerBalance = formatCurrency(totalBalanceEUR, 'EUR')
+
+  // ------ handlers ------
+
+  function handleToggleActive(container: Container) {
+    updateContainer.mutate({
+      id: container.id,
+      data: { isActive: !container.isActive },
+    })
+  }
+
+  function handleDelete(container: Container) {
+    if (confirm(`Eliminare il contenitore "${container.name}"?`)) {
+      deleteContainer.mutate(container.id)
+    }
+  }
+
+  // ------ loading state ------
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="h-8 w-8 animate-spin text-energy-400" />
+      </div>
+    )
+  }
+
+  // ------ error state ------
+  if (containersError) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-red-400">
+        <AlertCircle className="h-8 w-8 mb-3" />
+        <p className="text-sm">Errore nel caricamento dei contenitori.</p>
+        <p className="text-xs text-zinc-500 mt-1">{(containersError as Error).message}</p>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -405,7 +463,7 @@ export function Containers() {
           className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-zinc-600 transition-colors"
         >
           <option value="all">Tutti i soggetti</option>
-          {SUBJECTS.map((s) => (
+          {subjects.map((s) => (
             <option key={s.id} value={s.id}>
               {s.name}
             </option>
@@ -478,6 +536,7 @@ export function Containers() {
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {group.containers.map((container) => {
                   const balance = parseFloat(container.initialBalance || '0')
+                  const containerSubjectName = (container as Container & { subjectName?: string }).subjectName ?? subjectName(container.subjectId)
                   return (
                     <div
                       key={container.id}
@@ -502,23 +561,39 @@ export function Containers() {
                           </div>
                         </div>
 
-                        {/* Active / inactive badge */}
-                        {container.isActive ? (
-                          <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-400">
-                            Attivo
-                          </span>
-                        ) : (
-                          <span className="shrink-0 rounded-full bg-zinc-700/50 px-2 py-0.5 text-xs text-zinc-500">
-                            Inattivo
-                          </span>
-                        )}
+                        {/* Active / inactive badge + actions */}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {container.isActive ? (
+                            <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-400">
+                              Attivo
+                            </span>
+                          ) : (
+                            <span className="rounded-full bg-zinc-700/50 px-2 py-0.5 text-xs text-zinc-500">
+                              Inattivo
+                            </span>
+                          )}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleToggleActive(container) }}
+                            className="rounded-md p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 transition-colors"
+                            title={container.isActive ? 'Disattiva' : 'Riattiva'}
+                          >
+                            <CircleDot className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDelete(container) }}
+                            className="rounded-md p-1 text-zinc-500 hover:bg-zinc-800 hover:text-red-400 transition-colors"
+                            title="Elimina"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
                       </div>
 
                       {/* Subject */}
                       <p className="mt-3 text-xs text-zinc-500">
                         Soggetto:{' '}
                         <span className="text-zinc-400">
-                          {subjectName(container.subjectId)}
+                          {containerSubjectName}
                         </span>
                       </p>
 
@@ -601,10 +676,13 @@ export function Containers() {
       {/* ============ CREATE MODAL ============ */}
       {showCreate && (
         <ContainerModal
+          subjects={subjects}
           onClose={() => setShowCreate(false)}
-          onSave={(c) => {
-            setContainers((prev) => [...prev, c])
-            setShowCreate(false)
+          isSaving={createContainer.isPending}
+          onSave={(data) => {
+            createContainer.mutate(data, {
+              onSuccess: () => { setShowCreate(false) },
+            })
           }}
         />
       )}

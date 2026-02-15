@@ -23,7 +23,7 @@ import {
   parseCSVFile,
 } from '@/lib/csvEngine'
 import type { ImportPreview, ParsedRow } from '@/lib/csvEngine'
-import { CONTAINERS, SUBJECTS, getSubject } from '@/lib/mockData'
+import { useContainers, useSubjects } from '@/lib/hooks'
 import { formatCurrency, formatDate, cn } from '@/lib/utils'
 import type { ImportProfile } from '@/types'
 
@@ -111,11 +111,15 @@ const MAPPING_FIELDS: { key: keyof ColumnMapping; label: string; required: boole
 // ============================================================
 
 function useGroupedContainers() {
-  return useMemo(() => {
-    const groups: { subject: { id: string; name: string }; containers: typeof CONTAINERS }[] = []
-    const subjectMap = new Map<string, typeof CONTAINERS>()
+  const { data: allContainers = [] } = useContainers()
+  const { data: allSubjects = [] } = useSubjects()
 
-    for (const c of CONTAINERS) {
+  return useMemo(() => {
+    type ContainerItem = (typeof allContainers)[number]
+    const groups: { subject: { id: string; name: string }; containers: ContainerItem[] }[] = []
+    const subjectMap = new Map<string, ContainerItem[]>()
+
+    for (const c of allContainers) {
       if (!c.isActive) continue
       const list = subjectMap.get(c.subjectId) || []
       list.push(c)
@@ -123,19 +127,19 @@ function useGroupedContainers() {
     }
 
     for (const [subjectId, containers] of subjectMap) {
-      const subject = getSubject(subjectId)
+      const subject = allSubjects.find((s) => s.id === subjectId)
       groups.push({
         subject: { id: subjectId, name: subject?.name || subjectId },
         containers: containers.sort((a, b) => a.sortOrder - b.sortOrder),
       })
     }
 
-    // Sort groups by subject name
-    const subjectOrder = SUBJECTS.map(s => s.id)
+    // Sort groups by subject order
+    const subjectOrder = allSubjects.map(s => s.id)
     groups.sort((a, b) => subjectOrder.indexOf(a.subject.id) - subjectOrder.indexOf(b.subject.id))
 
     return groups
-  }, [])
+  }, [allContainers, allSubjects])
 }
 
 // ============================================================
@@ -570,9 +574,9 @@ export function ImportData() {
             {containerId && (
               <div className="mt-4 rounded-lg border border-zinc-700/50 bg-zinc-800/50 p-3">
                 {(() => {
-                  const container = CONTAINERS.find(c => c.id === containerId)
+                  const container = groupedContainers.flatMap(g => g.containers).find(c => c.id === containerId)
                   if (!container) return null
-                  const subject = getSubject(container.subjectId)
+                  const subject = groupedContainers.find(g => g.containers.some(c => c.id === containerId))?.subject
                   return (
                     <div className="flex items-center gap-3">
                       <div
