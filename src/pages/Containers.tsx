@@ -16,6 +16,8 @@ import {
   X,
   Loader2,
   AlertCircle,
+  Pencil,
+  Trash2,
 } from 'lucide-react'
 import type { ContainerType, Container } from '@/types'
 import {
@@ -80,24 +82,30 @@ function ContainerModal({
   onClose,
   onSave,
   isSaving,
+  existing,
+  saveError,
 }: {
   subjects: { id: string; name: string }[]
   onClose: () => void
   onSave: (data: Partial<Container>) => void
   isSaving: boolean
+  existing?: Container | null
+  saveError?: string | null
 }) {
+  const isEdit = !!existing
+
   const [form, setForm] = useState({
-    name: '',
-    type: 'bank_account' as ContainerType,
-    subjectId: subjects[0]?.id ?? '',
-    provider: '',
-    currency: 'EUR',
-    initialBalance: '0',
-    isMultiCurrency: false,
-    color: '#0066CC',
-    isActive: true,
-    notes: '',
-    billingDay: '',
+    name: existing?.name ?? '',
+    type: (existing?.type ?? 'bank_account') as ContainerType,
+    subjectId: existing?.subjectId ?? (subjects[0]?.id ?? ''),
+    provider: existing?.provider ?? '',
+    currency: existing?.currency ?? 'EUR',
+    initialBalance: existing?.initialBalance ?? '0',
+    isMultiCurrency: existing?.isMultiCurrency ?? false,
+    color: existing?.color ?? '#0066CC',
+    isActive: existing?.isActive ?? true,
+    notes: existing?.notes ?? '',
+    billingDay: existing?.billingDay != null ? String(existing.billingDay) : '',
   })
 
   function handleSave() {
@@ -112,12 +120,12 @@ function ContainerModal({
       isMultiCurrency: form.isMultiCurrency,
       initialBalance: form.initialBalance || '0',
       billingDay: form.billingDay ? parseInt(form.billingDay) : null,
-      linkedContainerId: null,
-      goalAmount: null,
-      goalDescription: null,
-      icon: null,
+      linkedContainerId: existing?.linkedContainerId ?? null,
+      goalAmount: existing?.goalAmount ?? null,
+      goalDescription: existing?.goalDescription ?? null,
+      icon: existing?.icon ?? null,
       color: form.color,
-      sortOrder: 999,
+      sortOrder: existing?.sortOrder ?? 999,
       isActive: form.isActive,
       notes: form.notes || null,
     })
@@ -130,7 +138,7 @@ function ContainerModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <div className="w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
-          <h2 className="text-lg font-semibold text-zinc-100">Nuovo Contenitore</h2>
+          <h2 className="text-lg font-semibold text-zinc-100">{isEdit ? 'Modifica Contenitore' : 'Nuovo Contenitore'}</h2>
           <button onClick={onClose} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200">
             <X className="h-5 w-5" />
           </button>
@@ -256,24 +264,32 @@ function ContainerModal({
           </div>
         </div>
 
-        <div className="flex justify-end gap-3 border-t border-zinc-800 px-6 py-4">
-          <button onClick={onClose} className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:border-zinc-600">
-            Annulla
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={!form.name.trim() || !form.subjectId || isSaving}
-            className="rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {isSaving ? (
-              <span className="flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Salvataggio...
-              </span>
-            ) : (
-              'Salva Contenitore'
-            )}
-          </button>
+        <div className="border-t border-zinc-800 px-6 py-4 space-y-3">
+          {saveError && (
+            <div className="flex items-start gap-2 rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2">
+              <AlertCircle className="h-4 w-4 text-red-400 mt-0.5 shrink-0" />
+              <p className="text-xs text-red-400">{saveError}</p>
+            </div>
+          )}
+          <div className="flex justify-end gap-3">
+            <button onClick={onClose} className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:border-zinc-600">
+              Annulla
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={!form.name.trim() || !form.subjectId || isSaving}
+              className="rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {isSaving ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Salvataggio...
+                </span>
+              ) : (
+                isEdit ? 'Salva Modifiche' : 'Salva Contenitore'
+              )}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -292,6 +308,8 @@ export function Containers() {
   const deleteContainer = useDeleteContainer()
 
   const [showCreate, setShowCreate] = useState(false)
+  const [editingContainer, setEditingContainer] = useState<Container | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [subjectFilter, setSubjectFilter] = useState<string>('all')
   const [showInactive, setShowInactive] = useState(false)
@@ -396,11 +414,30 @@ export function Containers() {
     })
   }
 
-  function handleDelete(container: Container) {
-    if (confirm(`Eliminare il contenitore "${container.name}"?`)) {
-      deleteContainer.mutate(container.id)
-    }
+  function handleUpdateContainer(data: Partial<Container>) {
+    if (!editingContainer) return
+    updateContainer.mutate(
+      { id: editingContainer.id, data },
+      { onSuccess: () => setEditingContainer(null) },
+    )
   }
+
+  function handleDelete(container: Container) {
+    if (!confirm(`Eliminare il contenitore "${container.name}"?`)) return
+    setDeleteError(null)
+    deleteContainer.mutate(container.id, {
+      onError: (err) => {
+        const msg = err instanceof Error ? err.message : 'Errore durante l\'eliminazione'
+        if (msg.includes('transaction') || msg.includes('foreign') || msg.includes('violat')) {
+          setDeleteError(`Impossibile eliminare "${container.name}": ci sono transazioni collegate. Elimina prima le transazioni associate o disattiva il contenitore.`)
+        } else {
+          setDeleteError(`Errore nell'eliminazione di "${container.name}": ${msg}`)
+        }
+      },
+    })
+  }
+
+  const updateErrorMsg = updateContainer.error instanceof Error ? updateContainer.error.message : updateContainer.error ? 'Errore nel salvataggio' : null
 
   // ------ loading state ------
   if (isLoading) {
@@ -580,11 +617,18 @@ export function Containers() {
                             <CircleDot className="h-3.5 w-3.5" />
                           </button>
                           <button
+                            onClick={(e) => { e.stopPropagation(); setEditingContainer(container) }}
+                            className="rounded-md p-1 text-zinc-500 hover:bg-zinc-800 hover:text-energy-400 transition-colors"
+                            title="Modifica"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          <button
                             onClick={(e) => { e.stopPropagation(); handleDelete(container) }}
                             className="rounded-md p-1 text-zinc-500 hover:bg-zinc-800 hover:text-red-400 transition-colors"
                             title="Elimina"
                           >
-                            <X className="h-3.5 w-3.5" />
+                            <Trash2 className="h-3.5 w-3.5" />
                           </button>
                         </div>
                       </div>
@@ -673,17 +717,45 @@ export function Containers() {
         </div>
       </div>
 
+      {/* ============ DELETE ERROR ============ */}
+      {deleteError && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 max-w-md w-full mx-4">
+          <div className="flex items-start gap-3 rounded-xl border border-red-500/20 bg-zinc-900 px-4 py-3 shadow-2xl">
+            <AlertCircle className="h-5 w-5 text-red-400 mt-0.5 shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm text-red-400">{deleteError}</p>
+            </div>
+            <button onClick={() => setDeleteError(null)} className="rounded p-1 text-zinc-500 hover:text-zinc-300">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ============ CREATE MODAL ============ */}
       {showCreate && (
         <ContainerModal
           subjects={subjects}
-          onClose={() => setShowCreate(false)}
+          onClose={() => { setShowCreate(false); createContainer.reset() }}
           isSaving={createContainer.isPending}
+          saveError={createContainer.error instanceof Error ? createContainer.error.message : createContainer.error ? 'Errore nel salvataggio' : null}
           onSave={(data) => {
             createContainer.mutate(data, {
               onSuccess: () => { setShowCreate(false) },
             })
           }}
+        />
+      )}
+
+      {/* ============ EDIT MODAL ============ */}
+      {editingContainer && (
+        <ContainerModal
+          subjects={subjects}
+          existing={editingContainer}
+          onClose={() => { setEditingContainer(null); updateContainer.reset() }}
+          isSaving={updateContainer.isPending}
+          saveError={updateErrorMsg}
+          onSave={handleUpdateContainer}
         />
       )}
     </div>

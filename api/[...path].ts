@@ -211,6 +211,14 @@ async function handleContainers(
   }
 
   if (method === 'DELETE' && id) {
+    // Check for linked transactions first
+    const { count } = await sb
+      .from('transactions')
+      .select('id', { count: 'exact', head: true })
+      .eq('container_id', id)
+    if (count && count > 0) {
+      return badRequest(res, `Impossibile eliminare: ci sono ${count} transazioni collegate a questo contenitore.`)
+    }
     const { data, error } = await sb.from('containers').delete().eq('id', id).select('id').single()
     if (error || !data) return notFound(res, 'Contenitore non trovato')
     return ok(res, { deleted: true, id })
