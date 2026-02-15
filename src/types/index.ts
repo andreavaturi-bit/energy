@@ -84,6 +84,7 @@ export interface Container {
   color?: string | null
   sortOrder: number
   isActive: boolean
+  isPinned: boolean
   notes?: string | null
   createdAt: string
   updatedAt: string

@@ -59,15 +59,19 @@ export function Dashboard() {
   const creditiPendenti = stats?.pending?.pendingCredits ?? 0
   const debitiPendenti = stats?.pending?.pendingDebits ?? 0
 
-  // Top containers by balance
-  const topContainers = [...containers]
-    .filter((c) => c.isActive)
-    .sort(
-      (a, b) =>
-        parseFloat(b.currentBalance ?? b.initialBalance ?? '0') -
-        parseFloat(a.currentBalance ?? a.initialBalance ?? '0'),
-    )
-    .slice(0, 10)
+  // Pinned containers (favorites), fallback to top by balance
+  const topContainers = (() => {
+    const active = containers.filter((c) => c.isActive)
+    const pinned = active.filter((c) => c.isPinned)
+    const list = pinned.length > 0 ? pinned : active
+    return [...list]
+      .sort(
+        (a, b) =>
+          parseFloat(b.currentBalance ?? b.initialBalance ?? '0') -
+          parseFloat(a.currentBalance ?? a.initialBalance ?? '0'),
+      )
+      .slice(0, 10)
+  })()
 
   // Type summary
   const typeSummary = (() => {
@@ -160,10 +164,10 @@ export function Dashboard() {
 
       {/* 3. Container balances section */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* Left: Conti Principali - top 10 by balance */}
+        {/* Left: Conti Principali - pinned or top 10 by balance */}
         <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-6">
           <h2 className="mb-4 text-lg font-semibold text-zinc-100">
-            Conti Principali
+            Conti Preferiti
           </h2>
           <div className="space-y-2">
             {topContainers.map((c) => {

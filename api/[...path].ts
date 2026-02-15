@@ -173,6 +173,7 @@ async function handleContainers(
         icon: b.icon ?? null,
         color: b.color ?? null,
         sort_order: b.sortOrder ?? 0,
+        is_pinned: b.isPinned ?? false,
         is_active: b.isActive ?? true,
         notes: b.notes ?? null,
       })
@@ -197,6 +198,7 @@ async function handleContainers(
     if (b.icon !== undefined) update.icon = b.icon
     if (b.color !== undefined) update.color = b.color
     if (b.sortOrder !== undefined) update.sort_order = b.sortOrder
+    if (b.isPinned !== undefined) update.is_pinned = b.isPinned
     if (b.isActive !== undefined) update.is_active = b.isActive
     if (b.notes !== undefined) update.notes = b.notes
 

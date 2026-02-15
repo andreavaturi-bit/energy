@@ -18,6 +18,7 @@ import {
   AlertCircle,
   Pencil,
   Trash2,
+  Star,
 } from 'lucide-react'
 import type { ContainerType, Container } from '@/types'
 import {
@@ -407,6 +408,13 @@ export function Containers() {
 
   // ------ handlers ------
 
+  function handleTogglePin(container: Container) {
+    updateContainer.mutate({
+      id: container.id,
+      data: { isPinned: !container.isPinned },
+    })
+  }
+
   function handleUpdateContainer(data: Partial<Container>) {
     if (!editingContainer) return
     updateContainer.mutate(
@@ -602,6 +610,17 @@ export function Containers() {
                               Inattivo
                             </span>
                           )}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleTogglePin(container) }}
+                            className={`rounded-md p-1 transition-colors ${
+                              container.isPinned
+                                ? 'text-amber-400 hover:bg-zinc-800 hover:text-amber-300'
+                                : 'text-zinc-500 hover:bg-zinc-800 hover:text-amber-400'
+                            }`}
+                            title={container.isPinned ? 'Rimuovi dai preferiti' : 'Aggiungi ai preferiti'}
+                          >
+                            <Star className={`h-3.5 w-3.5 ${container.isPinned ? 'fill-current' : ''}`} />
+                          </button>
                           <button
                             onClick={(e) => { e.stopPropagation(); setEditingContainer(container) }}
                             className="rounded-md p-1 text-zinc-500 hover:bg-zinc-800 hover:text-energy-400 transition-colors"
