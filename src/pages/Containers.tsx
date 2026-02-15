@@ -407,13 +407,6 @@ export function Containers() {
 
   // ------ handlers ------
 
-  function handleToggleActive(container: Container) {
-    updateContainer.mutate({
-      id: container.id,
-      data: { isActive: !container.isActive },
-    })
-  }
-
   function handleUpdateContainer(data: Partial<Container>) {
     if (!editingContainer) return
     updateContainer.mutate(
@@ -609,13 +602,6 @@ export function Containers() {
                               Inattivo
                             </span>
                           )}
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleToggleActive(container) }}
-                            className="rounded-md p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 transition-colors"
-                            title={container.isActive ? 'Disattiva' : 'Riattiva'}
-                          >
-                            <CircleDot className="h-3.5 w-3.5" />
-                          </button>
                           <button
                             onClick={(e) => { e.stopPropagation(); setEditingContainer(container) }}
                             className="rounded-md p-1 text-zinc-500 hover:bg-zinc-800 hover:text-energy-400 transition-colors"
