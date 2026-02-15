@@ -25,8 +25,15 @@ async function request<T>(
   })
 
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ message: res.statusText }))
-    throw new Error(error.message || `API error: ${res.status}`)
+    const text = await res.text().catch(() => '')
+    let message = ''
+    try {
+      const parsed = JSON.parse(text)
+      message = parsed.message || parsed.errorMessage || parsed.error || ''
+    } catch {
+      message = text.slice(0, 200)
+    }
+    throw new Error(message || `API error: ${res.status} ${res.statusText}`)
   }
 
   // 204 No Content

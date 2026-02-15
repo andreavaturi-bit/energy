@@ -11,8 +11,9 @@ import {
   RefreshCw,
   ChevronRight,
   X,
+  Loader2,
 } from 'lucide-react'
-import { TAGS, CONTAINERS } from '@/lib/mockData'
+import { useTags, useCreateTag, useUpdateTag, useDeleteTag } from '@/lib/hooks'
 import type { Tag as TagEntity, TagType } from '@/types'
 
 const typeLabels: Record<TagType, string> = {
@@ -23,7 +24,10 @@ const typeLabels: Record<TagType, string> = {
 }
 
 export function Settings() {
-  const [tags, setTags] = useState<TagEntity[]>([...TAGS])
+  const { data: tags = [], isLoading } = useTags()
+  const createTag = useCreateTag()
+  const updateTag = useUpdateTag()
+  const deleteTag = useDeleteTag()
   const [showTagModal, setShowTagModal] = useState(false)
   const [editingTag, setEditingTag] = useState<TagEntity | null>(null)
   const [tagFilter, setTagFilter] = useState<'all' | TagType>('all')
@@ -50,7 +54,7 @@ export function Settings() {
   }
 
   function handleDeleteTag(id: string) {
-    setTags((prev) => prev.filter((t) => t.id !== id))
+    deleteTag.mutate(id)
   }
 
   return (
@@ -64,6 +68,12 @@ export function Settings() {
       </div>
 
       {/* Tags management */}
+      {isLoading && (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-6 w-6 animate-spin text-energy-400" />
+          <span className="ml-2 text-sm text-zinc-400">Caricamento tag...</span>
+        </div>
+      )}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
         <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
           <div className="flex items-center gap-2">
@@ -279,23 +289,15 @@ export function Settings() {
           onClose={() => setShowTagModal(false)}
           onSave={(data) => {
             if (editingTag) {
-              setTags((prev) =>
-                prev.map((t) => (t.id === editingTag.id ? { ...t, ...data } : t)),
+              updateTag.mutate(
+                { id: editingTag.id, data },
+                { onSuccess: () => setShowTagModal(false) },
               )
             } else {
-              const newTag: TagEntity = {
-                id: `tag-${Date.now()}`,
-                name: data.name,
-                type: data.type,
-                color: data.color || null,
-                icon: data.icon || null,
-                parentId: data.parentId || null,
-                isActive: true,
-                createdAt: new Date().toISOString(),
-              }
-              setTags((prev) => [...prev, newTag])
+              createTag.mutate(data, {
+                onSuccess: () => setShowTagModal(false),
+              })
             }
-            setShowTagModal(false)
           }}
         />
       )}

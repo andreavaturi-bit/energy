@@ -9,7 +9,7 @@ import {
   X,
   Trash2,
 } from 'lucide-react'
-import { TAGS } from '@/lib/mockData'
+import { useTags, useBudgetPeriods, useCreateBudgetPeriod, useCreateBudgetAllocation, useDeleteBudgetAllocation } from '@/lib/hooks'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -161,11 +161,12 @@ function PeriodModal({
 function AllocationModal({
   onClose,
   onSave,
+  categoryTags,
 }: {
   onClose: () => void
   onSave: (row: BudgetRow) => void
+  categoryTags: Array<{ id: string; name: string }>
 }) {
-  const categoryTags = TAGS.filter((t) => t.type === 'category')
 
   const [form, setForm] = useState({
     tagId: '',
@@ -250,6 +251,8 @@ function AllocationModal({
 // ---------------------------------------------------------------------------
 
 export function Budget() {
+  const { data: tags = [] } = useTags()
+  const categoryTags = tags.filter((t) => t.type === 'category')
   const [periods, setPeriods] = useState<BudgetPeriodData[]>(initialPeriods)
   const [currentIndex, setCurrentIndex] = useState(0)
   const [showPeriodModal, setShowPeriodModal] = useState(false)
@@ -543,6 +546,7 @@ export function Budget() {
 
       {showAllocationModal && (
         <AllocationModal
+          categoryTags={categoryTags}
           onClose={() => setShowAllocationModal(false)}
           onSave={(row) => {
             setPeriods((prev) =>

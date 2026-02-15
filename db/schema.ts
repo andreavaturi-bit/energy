@@ -72,6 +72,7 @@ export const containers = pgTable('containers', {
   color: text('color'),
   sortOrder: integer('sort_order').default(0),
   // Status
+  isPinned: boolean('is_pinned').default(false).notNull(),
   isActive: boolean('is_active').default(true).notNull(),
   notes: text('notes'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

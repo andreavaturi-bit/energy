@@ -10,15 +10,22 @@ import {
   Pencil,
   Trash2,
   X,
-  MapPin,
   Wallet,
   Users,
   ChevronRight,
   Eye,
   EyeOff,
   Globe,
+  Loader2,
+  AlertCircle,
 } from 'lucide-react'
-import { SUBJECTS, CONTAINERS, getContainersBySubject } from '@/lib/mockData'
+import {
+  useSubjects,
+  useContainers,
+  useCreateSubject,
+  useUpdateSubject,
+  useDeleteSubject,
+} from '@/lib/hooks'
 import type { Subject, SubjectType, SubjectRole } from '@/types'
 
 const roleColors: Record<string, string> = {
@@ -65,7 +72,12 @@ const emptyForm: SubjectFormData = {
 }
 
 export function Subjects() {
-  const [subjects, setSubjects] = useState<Subject[]>([...SUBJECTS])
+  const { data: subjects = [], isLoading, isError, error } = useSubjects()
+  const { data: containers = [] } = useContainers()
+  const createSubject = useCreateSubject()
+  const updateSubject = useUpdateSubject()
+  const deleteSubject = useDeleteSubject()
+
   const [search, setSearch] = useState('')
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
   const [showInactive, setShowInactive] = useState(false)
@@ -117,56 +129,61 @@ export function Subjects() {
     if (!form.name.trim()) return
 
     if (editingSubject) {
-      setSubjects((prev) =>
-        prev.map((s) =>
-          s.id === editingSubject.id
-            ? {
-                ...s,
-                ...form,
-                legalForm: form.legalForm || null,
-                parentSubjectId: form.parentSubjectId || null,
-                notes: form.notes || null,
-                updatedAt: new Date().toISOString(),
-              }
-            : s,
-        ),
+      updateSubject.mutate(
+        {
+          id: editingSubject.id,
+          data: {
+            type: form.type,
+            name: form.name,
+            legalForm: form.legalForm || null,
+            country: form.country,
+            role: form.role,
+            parentSubjectId: form.parentSubjectId || null,
+            notes: form.notes || null,
+          },
+        },
+        {
+          onSuccess: () => {
+            setShowModal(false)
+          },
+        },
       )
     } else {
-      const newSubject: Subject = {
-        id: `s-${Date.now()}`,
-        type: form.type,
-        name: form.name,
-        legalForm: form.legalForm || null,
-        country: form.country,
-        role: form.role,
-        parentSubjectId: form.parentSubjectId || null,
-        notes: form.notes || null,
-        isActive: true,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      }
-      setSubjects((prev) => [...prev, newSubject])
+      createSubject.mutate(
+        {
+          type: form.type,
+          name: form.name,
+          legalForm: form.legalForm || null,
+          country: form.country,
+          role: form.role,
+          parentSubjectId: form.parentSubjectId || null,
+          notes: form.notes || null,
+          isActive: true,
+        },
+        {
+          onSuccess: () => {
+            setShowModal(false)
+          },
+        },
+      )
     }
-    setShowModal(false)
   }
 
   function handleToggleActive(subject: Subject) {
-    setSubjects((prev) =>
-      prev.map((s) =>
-        s.id === subject.id
-          ? { ...s, isActive: !s.isActive, updatedAt: new Date().toISOString() }
-          : s,
-      ),
-    )
+    updateSubject.mutate({
+      id: subject.id,
+      data: { isActive: !subject.isActive },
+    })
     setMenuOpen(null)
   }
 
   function handleDelete(subject: Subject) {
-    if (getContainersBySubject(subject.id).length > 0) {
+    const subjectContainers = containers.filter((c) => c.subjectId === subject.id)
+    if (subjectContainers.length > 0) {
       alert('Impossibile eliminare: il soggetto ha contenitori associati.')
       return
     }
-    setSubjects((prev) => prev.filter((s) => s.id !== subject.id))
+    deleteSubject.mutate(subject.id)
     setMenuOpen(null)
   }
 
@@ -177,7 +194,31 @@ export function Subjects() {
   }
 
   function getContainerCount(subjectId: string): number {
-    return CONTAINERS.filter((c) => c.subjectId === subjectId).length
+    return containers.filter((c) => c.subjectId === subjectId).length
+  }
+
+  // Loading state
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="flex items-center gap-3 text-zinc-400">
+          <Loader2 className="h-6 w-6 animate-spin" />
+          <span>Caricamento soggetti...</span>
+        </div>
+      </div>
+    )
+  }
+
+  // Error state
+  if (isError) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="flex items-center gap-3 text-red-400">
+          <AlertCircle className="h-6 w-6" />
+          <span>Errore nel caricamento: {error instanceof Error ? error.message : 'Errore sconosciuto'}</span>
+        </div>
+      </div>
+    )
   }
 
   function renderSubjectCard(subject: Subject) {
@@ -607,9 +648,16 @@ export function Subjects() {
               <button
                 className="rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors disabled:opacity-50"
                 onClick={handleSave}
-                disabled={!form.name.trim()}
+                disabled={!form.name.trim() || createSubject.isPending || updateSubject.isPending}
               >
-                {editingSubject ? 'Salva Modifiche' : 'Crea Soggetto'}
+                {(createSubject.isPending || updateSubject.isPending) ? (
+                  <span className="flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Salvataggio...
+                  </span>
+                ) : (
+                  editingSubject ? 'Salva Modifiche' : 'Crea Soggetto'
+                )}
               </button>
             </div>
           </div>

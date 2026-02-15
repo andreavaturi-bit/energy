@@ -7,7 +7,7 @@ import {
   badRequest,
   notFound,
   serverError,
-} from './_lib/supabase'
+} from './_lib/supabase.js'
 
 // ── Utility ─────────────────────────────────────────────────
 
@@ -114,10 +114,30 @@ async function handleContainers(
       .order('sort_order')
       .order('name')
     if (error) throw error
-    // Flatten: subjects.name → subject_name
+
+    // Fetch transaction sums per container (non-cancelled)
+    const { data: txSums } = await sb
+      .from('transactions')
+      .select('container_id, amount')
+      .neq('status', 'cancelled')
+
+    const sumMap = new Map<string, number>()
+    for (const t of txSums || []) {
+      const cid = t.container_id as string
+      const amt = parseFloat(t.amount as string) || 0
+      sumMap.set(cid, (sumMap.get(cid) || 0) + amt)
+    }
+
+    // Flatten: subjects.name → subject_name, add current_balance
     const rows = (data || []).map((r: Record<string, unknown>) => {
       const { subjects, ...rest } = r as Record<string, unknown> & { subjects?: { name: string } }
-      return { ...rest, subject_name: subjects?.name ?? null }
+      const initialBal = parseFloat(rest.initial_balance as string) || 0
+      const txSum = sumMap.get(rest.id as string) || 0
+      return {
+        ...rest,
+        subject_name: subjects?.name ?? null,
+        current_balance: (initialBal + txSum).toFixed(4),
+      }
     })
     return ok(res, rows)
   }
@@ -153,6 +173,7 @@ async function handleContainers(
         icon: b.icon ?? null,
         color: b.color ?? null,
         sort_order: b.sortOrder ?? 0,
+        is_pinned: b.isPinned ?? false,
         is_active: b.isActive ?? true,
         notes: b.notes ?? null,
       })
@@ -177,6 +198,7 @@ async function handleContainers(
     if (b.icon !== undefined) update.icon = b.icon
     if (b.color !== undefined) update.color = b.color
     if (b.sortOrder !== undefined) update.sort_order = b.sortOrder
+    if (b.isPinned !== undefined) update.is_pinned = b.isPinned
     if (b.isActive !== undefined) update.is_active = b.isActive
     if (b.notes !== undefined) update.notes = b.notes
 
@@ -191,6 +213,14 @@ async function handleContainers(
   }
 
   if (method === 'DELETE' && id) {
+    // Check for linked transactions first
+    const { count } = await sb
+      .from('transactions')
+      .select('id', { count: 'exact', head: true })
+      .eq('container_id', id)
+    if (count && count > 0) {
+      return badRequest(res, `Impossibile eliminare: ci sono ${count} transazioni collegate a questo contenitore.`)
+    }
     const { data, error } = await sb.from('containers').delete().eq('id', id).select('id').single()
     if (error || !data) return notFound(res, 'Contenitore non trovato')
     return ok(res, { deleted: true, id })
@@ -365,7 +395,7 @@ async function handleTransactions(
     let query = sb
       .from('transactions')
       .select(
-        '*, containers(name, color, currency), counterparties(name), subjects!transactions_shared_with_subject_id_fk(name)',
+        '*, containers(name, color, currency), counterparties(name), subjects!transactions_shared_with_subject_id_subjects_id_fk(name)',
         { count: 'exact' },
       )
 
@@ -410,7 +440,7 @@ async function handleTransactions(
     const { data, error } = await sb
       .from('transactions')
       .select(
-        '*, containers(name, color), counterparties(name), subjects!transactions_shared_with_subject_id_fk(name)',
+        '*, containers(name, color), counterparties(name), subjects!transactions_shared_with_subject_id_subjects_id_fk(name)',
       )
       .eq('id', id)
       .single()
@@ -834,17 +864,35 @@ async function handleStats(
 ) {
   const sb = getSupabase()
 
-  // 1) Balances by currency (active containers)
+  // 1) Balances by currency (active containers + their transactions)
   const { data: containers } = await sb
     .from('containers')
-    .select('currency, initial_balance')
+    .select('id, currency, initial_balance')
     .eq('is_active', true)
+
+  // Fetch transaction sums per container (non-cancelled)
+  const activeIds = (containers || []).map((c) => c.id as string)
+  const { data: txSums } = activeIds.length > 0
+    ? await sb
+        .from('transactions')
+        .select('container_id, amount')
+        .in('container_id', activeIds)
+        .neq('status', 'cancelled')
+    : { data: [] }
+
+  const txSumMap = new Map<string, number>()
+  for (const t of txSums || []) {
+    const cid = t.container_id as string
+    const amt = parseFloat(t.amount as string) || 0
+    txSumMap.set(cid, (txSumMap.get(cid) || 0) + amt)
+  }
 
   const balanceMap = new Map<string, number>()
   for (const c of containers || []) {
     const cur = c.currency as string
-    const bal = parseFloat(c.initial_balance as string) || 0
-    balanceMap.set(cur, (balanceMap.get(cur) || 0) + bal)
+    const initialBal = parseFloat(c.initial_balance as string) || 0
+    const txSum = txSumMap.get(c.id as string) || 0
+    balanceMap.set(cur, (balanceMap.get(cur) || 0) + initialBal + txSum)
   }
   const balances = Array.from(balanceMap.entries()).map(([currency, total]) => ({
     currency,
@@ -938,13 +986,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   setCors(res)
   if (req.method === 'OPTIONS') return res.status(204).end()
 
-  // Extract path segments from catch-all
+  // Extract path segments from catch-all query param
   const pathParam = req.query.path
-  const segments: string[] = Array.isArray(pathParam)
-    ? pathParam
-    : pathParam
-      ? [pathParam]
-      : []
+  let segments: string[]
+
+  if (pathParam) {
+    segments = Array.isArray(pathParam) ? pathParam : [pathParam]
+  } else {
+    // Fallback: parse from req.url (needed for non-Next.js Vercel projects
+    // where req.query.path may not be populated by the catch-all route)
+    const url = req.url || ''
+    const pathPart = url.split('?')[0]
+    const apiPath = pathPart.replace(/^\/api\/?/, '')
+    segments = apiPath ? apiPath.split('/').filter(Boolean) : []
+  }
 
   const resource = segments[0] || ''
 
@@ -966,6 +1021,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return await handleBudget(req, res, segments)
       case 'stats':
         return await handleStats(req, res)
+      case 'health':
+        return res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() })
+      case '':
+        return res.status(200).json({
+          status: 'ok',
+          endpoints: ['subjects', 'containers', 'counterparties', 'tags', 'transactions', 'recurrences', 'budget', 'stats', 'health'],
+        })
       default:
         return res.status(404).json({ error: 'Not Found', message: `Nessun handler per: /${segments.join('/')}` })
     }

@@ -15,7 +15,7 @@ import {
   Filter,
   Clock,
 } from 'lucide-react'
-import { CONTAINERS, COUNTERPARTIES, SUBJECTS, getContainer, getCounterparty } from '@/lib/mockData'
+import { useContainers, useCounterparties } from '@/lib/hooks'
 import { formatCurrency } from '@/lib/utils'
 import type { Frequency, TransactionType } from '@/types'
 
@@ -129,6 +129,8 @@ function getMonthlyImpact(rec: MockRecurrence): number {
 }
 
 export function Recurrences() {
+  const { data: containers = [] } = useContainers()
+  const { data: counterparties = [] } = useCounterparties()
   const [recurrences, setRecurrences] = useState<MockRecurrence[]>(initialRecurrences)
   const [search, setSearch] = useState('')
   const [filterType, setFilterType] = useState<'all' | 'income' | 'expense' | 'transfer_out'>('all')
@@ -297,8 +299,8 @@ export function Recurrences() {
             </div>
           ) : (
             filtered.map((rec) => {
-              const container = getContainer(rec.containerId)
-              const counterparty = rec.counterpartyId ? getCounterparty(rec.counterpartyId) : null
+              const container = containers.find((c) => c.id === rec.containerId)
+              const counterparty = rec.counterpartyId ? counterparties.find((cp) => cp.id === rec.counterpartyId) : null
               const amount = parseFloat(rec.amount)
               const daysUntil = getDaysUntilNext(rec)
 
@@ -449,6 +451,8 @@ export function Recurrences() {
       {showModal && (
         <RecurrenceModal
           recurrence={editingRec}
+          containers={containers}
+          counterparties={counterparties}
           onClose={() => setShowModal(false)}
           onSave={(data) => {
             if (editingRec) {
@@ -468,10 +472,14 @@ export function Recurrences() {
 
 function RecurrenceModal({
   recurrence,
+  containers,
+  counterparties,
   onClose,
   onSave,
 }: {
   recurrence: MockRecurrence | null
+  containers: Array<{ id: string; name: string; isActive: boolean }>
+  counterparties: Array<{ id: string; name: string }>
   onClose: () => void
   onSave: (data: Omit<MockRecurrence, 'id' | 'isActive'>) => void
 }) {
@@ -604,7 +612,7 @@ function RecurrenceModal({
               className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none"
             >
               <option value="">— Seleziona —</option>
-              {CONTAINERS.filter((c) => c.isActive).map((c) => (
+              {containers.filter((c) => c.isActive).map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
@@ -619,7 +627,7 @@ function RecurrenceModal({
               className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none"
             >
               <option value="">— Nessuna —</option>
-              {COUNTERPARTIES.map((cp) => (
+              {counterparties.map((cp) => (
                 <option key={cp.id} value={cp.id}>{cp.name}</option>
               ))}
             </select>

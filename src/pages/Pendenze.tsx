@@ -11,7 +11,7 @@ import {
   Trash2,
   MoreHorizontal,
 } from 'lucide-react'
-import { CONTAINERS, COUNTERPARTIES, getContainer, getCounterparty } from '@/lib/mockData'
+import { useContainers } from '@/lib/hooks'
 import { formatCurrency } from '@/lib/utils'
 
 interface PendingItem {
@@ -58,6 +58,7 @@ const initialPlans: InstallmentPlanItem[] = [
 ]
 
 export function Pendenze() {
+  const { data: containers = [] } = useContainers()
   const [pending, setPending] = useState<PendingItem[]>(initialPending)
   const [plans, setPlans] = useState<InstallmentPlanItem[]>(initialPlans)
   const [showModal, setShowModal] = useState(false)
@@ -197,7 +198,7 @@ export function Pendenze() {
                     <div className="flex items-center gap-2 mt-0.5">
                       <span className="text-xs text-zinc-500">{item.counterpartyName}</span>
                       <span className="text-xs text-zinc-600">|</span>
-                      <span className="text-xs text-zinc-500">{getContainer(item.containerId)?.name || ''}</span>
+                      <span className="text-xs text-zinc-500">{containers.find((c) => c.id === item.containerId)?.name || ''}</span>
                       {item.notes && (
                         <>
                           <span className="text-xs text-zinc-600">—</span>
@@ -280,7 +281,7 @@ export function Pendenze() {
                     <div className="flex items-center gap-2 mt-0.5">
                       <span className="text-xs text-zinc-500">{item.counterpartyName}</span>
                       <span className="text-xs text-zinc-600">|</span>
-                      <span className="text-xs text-zinc-500">{getContainer(item.containerId)?.name || ''}</span>
+                      <span className="text-xs text-zinc-500">{containers.find((c) => c.id === item.containerId)?.name || ''}</span>
                       {item.notes && (
                         <>
                           <span className="text-xs text-zinc-600">—</span>
@@ -351,7 +352,7 @@ export function Pendenze() {
                     <div className="flex items-center gap-2 mt-0.5">
                       <span className="text-xs text-zinc-500">{plan.counterpartyName}</span>
                       <span className="text-xs text-zinc-600">|</span>
-                      <span className="text-xs text-zinc-500">{getContainer(plan.containerId)?.name || ''}</span>
+                      <span className="text-xs text-zinc-500">{containers.find((c) => c.id === plan.containerId)?.name || ''}</span>
                     </div>
                   </div>
                   <p className="text-sm font-semibold text-zinc-100">{formatCurrency(plan.totalAmount)}</p>
@@ -391,6 +392,7 @@ export function Pendenze() {
       {showModal && (
         <AddPendingModal
           type={modalType}
+          containers={containers}
           onClose={() => setShowModal(false)}
           onSave={(item) => {
             setPending((prev) => [...prev, { ...item, id: `p-${Date.now()}`, status: 'pending' }])
@@ -404,10 +406,12 @@ export function Pendenze() {
 
 function AddPendingModal({
   type,
+  containers,
   onClose,
   onSave,
 }: {
   type: 'credit' | 'debit'
+  containers: Array<{ id: string; name: string; isActive: boolean; type: string }>
   onClose: () => void
   onSave: (item: Omit<PendingItem, 'id' | 'status'>) => void
 }) {
@@ -492,7 +496,7 @@ function AddPendingModal({
               className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none"
             >
               <option value="">— Seleziona —</option>
-              {CONTAINERS.filter((c) => c.isActive && c.type === 'bank_account').map((c) => (
+              {containers.filter((c) => c.isActive && c.type === 'bank_account').map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>

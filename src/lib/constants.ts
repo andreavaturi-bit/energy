@@ -1,6 +1,6 @@
 import type { ContainerType, TransactionType, Frequency, TagType } from '@/types'
 
-export const APP_NAME = 'eN€RGY'
+export const APP_NAME = 'EN€RGY'
 export const APP_TAGLINE = 'Il denaro e\' energia'
 
 export const CURRENCIES = [

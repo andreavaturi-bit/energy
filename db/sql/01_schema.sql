@@ -41,6 +41,7 @@ CREATE TABLE "containers" (
 	"icon" text,
 	"color" text,
 	"sort_order" integer DEFAULT 0,
+	"is_pinned" boolean DEFAULT false NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"notes" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
