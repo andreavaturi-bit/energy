@@ -10,8 +10,8 @@ dist-ssr
 .env.local
 .env.*.local
 
-# Netlify
-.netlify
+# Vercel
+.vercel
 
 # Drizzle migrations output
 .drizzle

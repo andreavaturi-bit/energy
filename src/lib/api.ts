@@ -7,7 +7,7 @@ import type {
   Recurrence,
 } from '@/types'
 
-// ── Base URL: /api proxied to /.netlify/functions/api via netlify.toml ──
+// ── Base URL: /api served by Vercel serverless functions ──
 const API_BASE = '/api'
 
 // ── Generic request helper ──────────────────────────────────

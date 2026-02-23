@@ -11,12 +11,4 @@ export default defineConfig({
       '@db': path.resolve(__dirname, './db'),
     },
   },
-  server: {
-    proxy: {
-      '/.netlify/functions': {
-        target: 'http://localhost:8888',
-        changeOrigin: true,
-      },
-    },
-  },
 })
