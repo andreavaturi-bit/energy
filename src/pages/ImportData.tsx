@@ -24,6 +24,8 @@ import {
 } from '@/lib/csvEngine'
 import type { ImportPreview, ParsedRow } from '@/lib/csvEngine'
 import { useContainers, useSubjects } from '@/lib/hooks'
+import { transactionsApi } from '@/lib/api'
+import { useQueryClient } from '@tanstack/react-query'
 import { formatCurrency, formatDate, cn } from '@/lib/utils'
 import type { ImportProfile } from '@/types'
 
@@ -421,21 +423,45 @@ export function ImportData() {
     }
   }, [file, buildEffectiveProfile])
 
-  /** Step 3 -> 4: perform import (mock) */
-  const performImport = useCallback(() => {
-    if (!preview) return
+  // --- Import in progress flag ---
+  const [isImporting, setIsImporting] = useState(false)
+  const queryClient = useQueryClient()
 
-    // In a real app, we'd call convertToTransactions and save to DB
+  /** Step 3 -> 4: perform import */
+  const performImport = useCallback(async () => {
+    if (!preview || isImporting) return
+
     const readyRows = preview.parsedRows.filter(r => r.status === 'ready')
-    const _transactions = convertToTransactions(readyRows, containerId, 'csv_import')
+    const transactions = convertToTransactions(readyRows, containerId, 'csv_import')
 
-    setImportResult({
-      imported: preview.readyCount,
-      duplicates: preview.duplicateCount,
-      errors: preview.errorCount,
-    })
-    setStep(4)
-  }, [preview, containerId])
+    if (transactions.length === 0) return
+
+    setIsImporting(true)
+    try {
+      await transactionsApi.batchCreate(transactions)
+
+      // Invalidate caches so transaction list and stats refresh
+      queryClient.invalidateQueries({ queryKey: ['transactions'] })
+      queryClient.invalidateQueries({ queryKey: ['stats'] })
+
+      setImportResult({
+        imported: preview.readyCount,
+        duplicates: preview.duplicateCount,
+        errors: preview.errorCount,
+      })
+      setStep(4)
+    } catch (err) {
+      console.error('Import failed:', err)
+      setImportResult({
+        imported: 0,
+        duplicates: preview.duplicateCount,
+        errors: preview.readyCount + preview.errorCount,
+      })
+      setStep(4)
+    } finally {
+      setIsImporting(false)
+    }
+  }, [preview, containerId, isImporting, queryClient])
 
   /** Reset wizard */
   const resetWizard = useCallback(() => {
@@ -998,17 +1024,26 @@ export function ImportData() {
               Indietro
             </button>
             <button
-              disabled={preview.readyCount === 0}
+              disabled={preview.readyCount === 0 || isImporting}
               onClick={performImport}
               className={cn(
                 'flex items-center gap-2 rounded-lg px-6 py-2.5 text-sm font-medium transition-colors',
-                preview.readyCount > 0
+                preview.readyCount > 0 && !isImporting
                   ? 'bg-energy-500 text-zinc-950 hover:bg-energy-400'
                   : 'cursor-not-allowed bg-zinc-800 text-zinc-600',
               )}
             >
-              Importa {preview.readyCount} transazioni
-              <ArrowRight className="h-4 w-4" />
+              {isImporting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Importazione in corso...
+                </>
+              ) : (
+                <>
+                  Importa {preview.readyCount} transazioni
+                  <ArrowRight className="h-4 w-4" />
+                </>
+              )}
             </button>
           </div>
         </div>

@@ -112,6 +112,8 @@ export const transactionsApi = {
   get: (id: string) => api.get<Transaction & { tags?: Tag[] }>(`/transactions/${id}`),
   create: (data: Partial<Transaction> & { tagIds?: string[] }) =>
     api.post<Transaction>('/transactions', data),
+  batchCreate: (transactions: Partial<Transaction>[]) =>
+    api.post<Transaction[]>('/transactions/batch', { transactions }),
   update: (id: string, data: Partial<Transaction> & { tagIds?: string[] }) =>
     api.put<Transaction>(`/transactions/${id}`, data),
   delete: (id: string) => api.delete(`/transactions/${id}`),
