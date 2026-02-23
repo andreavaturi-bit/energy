@@ -9,34 +9,34 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 // --- Currency formatting ---
+// Manual Italian-style formatting to guarantee thousands separator (.)
+// across all browsers and environments.
 
-const currencyFormatters: Record<string, Intl.NumberFormat> = {}
+const currencySymbols: Record<string, string> = {
+  EUR: '€',
+  USD: '$',
+  GBP: '£',
+  RON: 'lei',
+  CHF: 'CHF',
+}
 
-function getCurrencyFormatter(currency: string): Intl.NumberFormat {
-  if (!currencyFormatters[currency]) {
-    currencyFormatters[currency] = new Intl.NumberFormat('it-IT', {
-      style: 'currency',
-      currency,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    })
-  }
-  return currencyFormatters[currency]
+function formatItalian(num: number): string {
+  const [intPart, decPart] = Math.abs(num).toFixed(2).split('.')
+  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+  return `${num < 0 ? '-' : ''}${grouped},${decPart}`
 }
 
 export function formatCurrency(amount: number | string, currency = 'EUR'): string {
   const num = typeof amount === 'string' ? parseFloat(amount) : amount
   if (isNaN(num)) return '—'
-  return getCurrencyFormatter(currency).format(num)
+  const symbol = currencySymbols[currency] || currency
+  return `${formatItalian(num)} ${symbol}`
 }
 
 export function formatAmount(amount: number | string): string {
   const num = typeof amount === 'string' ? parseFloat(amount) : amount
   if (isNaN(num)) return '—'
-  return new Intl.NumberFormat('it-IT', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(num)
+  return formatItalian(num)
 }
 
 // --- Date formatting ---
