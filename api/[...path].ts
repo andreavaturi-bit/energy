@@ -469,6 +469,45 @@ async function handleTransactions(
     return ok(res, { ...row, tags })
   }
 
+  // POST /transactions/batch — bulk import
+  if (method === 'POST' && id === 'batch') {
+    const items = req.body?.transactions as unknown[]
+    if (!Array.isArray(items) || items.length === 0) {
+      return badRequest(res, 'transactions array is required and must not be empty')
+    }
+
+    const rows = items.map((b: Record<string, unknown>) => ({
+      date: b.date,
+      value_date: b.valueDate ?? null,
+      description: b.description ?? null,
+      notes: b.notes ?? null,
+      amount: b.amount,
+      currency: b.currency ?? 'EUR',
+      amount_eur: b.amountEur ?? null,
+      exchange_rate: b.exchangeRate ?? null,
+      container_id: b.containerId,
+      counterparty_id: b.counterpartyId ?? null,
+      type: b.type,
+      transfer_linked_id: b.transferLinkedId ?? null,
+      status: b.status ?? 'completed',
+      source: b.source ?? 'manual',
+      shared_with_subject_id: b.sharedWithSubjectId ?? null,
+      share_percentage: b.sharePercentage ?? null,
+      installment_plan_id: b.installmentPlanId ?? null,
+      installment_number: b.installmentNumber ?? null,
+      external_id: b.externalId ?? null,
+      external_hash: b.externalHash ?? null,
+    }))
+
+    const { data, error } = await sb
+      .from('transactions')
+      .insert(rows)
+      .select()
+    if (error) throw error
+
+    return created(res, data)
+  }
+
   if (method === 'POST') {
     const b = req.body || {}
     if (!b.date || !b.amount || !b.containerId || !b.type) {
@@ -497,6 +536,7 @@ async function handleTransactions(
         installment_plan_id: b.installmentPlanId ?? null,
         installment_number: b.installmentNumber ?? null,
         external_id: b.externalId ?? null,
+        external_hash: b.externalHash ?? null,
       })
       .select()
       .single()
