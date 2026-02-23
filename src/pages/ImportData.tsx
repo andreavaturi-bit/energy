@@ -62,6 +62,7 @@ interface ImportResultData {
   imported: number
   duplicates: number
   errors: number
+  errorMessages?: string[]
 }
 
 // ============================================================
@@ -438,24 +439,27 @@ export function ImportData() {
 
     setIsImporting(true)
     try {
-      await transactionsApi.batchCreate(transactions)
+      const result = await transactionsApi.batchCreate(transactions)
 
       // Invalidate caches so transaction list and stats refresh
       queryClient.invalidateQueries({ queryKey: ['transactions'] })
       queryClient.invalidateQueries({ queryKey: ['stats'] })
 
       setImportResult({
-        imported: preview.readyCount,
+        imported: result.inserted,
         duplicates: preview.duplicateCount,
-        errors: preview.errorCount,
+        errors: result.failed + preview.errorCount,
+        errorMessages: result.errors,
       })
       setStep(4)
     } catch (err) {
       console.error('Import failed:', err)
+      const message = err instanceof Error ? err.message : 'Errore sconosciuto'
       setImportResult({
         imported: 0,
         duplicates: preview.duplicateCount,
         errors: preview.readyCount + preview.errorCount,
+        errorMessages: [message],
       })
       setStep(4)
     } finally {
@@ -1052,13 +1056,27 @@ export function ImportData() {
       {/* ============================== STEP 4 ============================== */}
       {step === 4 && importResult && (
         <div className="flex flex-col items-center justify-center rounded-xl border border-zinc-800 bg-zinc-900 px-6 py-16">
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-energy-500/15">
-            <CheckCircle2 className="h-8 w-8 text-energy-400" />
-          </div>
-          <h2 className="mt-4 text-xl font-bold text-zinc-100">Importazione Completata</h2>
-          <p className="mt-2 text-sm text-zinc-400">
-            Le transazioni sono state importate con successo nel contenitore selezionato.
-          </p>
+          {importResult.imported > 0 ? (
+            <>
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-energy-500/15">
+                <CheckCircle2 className="h-8 w-8 text-energy-400" />
+              </div>
+              <h2 className="mt-4 text-xl font-bold text-zinc-100">Importazione Completata</h2>
+              <p className="mt-2 text-sm text-zinc-400">
+                Le transazioni sono state importate nel contenitore selezionato.
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-red-500/15">
+                <XCircle className="h-8 w-8 text-red-400" />
+              </div>
+              <h2 className="mt-4 text-xl font-bold text-zinc-100">Importazione Fallita</h2>
+              <p className="mt-2 text-sm text-zinc-400">
+                Nessuna transazione importata. Controlla gli errori qui sotto.
+              </p>
+            </>
+          )}
 
           {/* Result summary */}
           <div className="mt-8 flex gap-6">
@@ -1075,6 +1093,18 @@ export function ImportData() {
               <p className="text-xs text-zinc-500">Errori</p>
             </div>
           </div>
+
+          {/* Error details */}
+          {importResult.errorMessages && importResult.errorMessages.length > 0 && (
+            <div className="mt-6 w-full max-w-lg rounded-lg border border-red-500/30 bg-red-500/5 p-4">
+              <p className="mb-2 text-sm font-medium text-red-400">Dettaglio errori:</p>
+              {importResult.errorMessages.map((msg, i) => (
+                <p key={i} className="text-xs text-zinc-400 break-all">
+                  {msg}
+                </p>
+              ))}
+            </div>
+          )}
 
           {/* Actions */}
           <div className="mt-8 flex gap-4">

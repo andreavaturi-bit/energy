@@ -469,7 +469,7 @@ async function handleTransactions(
     return ok(res, { ...row, tags })
   }
 
-  // POST /transactions/batch — bulk import
+  // POST /transactions/batch — bulk import (chunked)
   if (method === 'POST' && id === 'batch') {
     const items = req.body?.transactions as unknown[]
     if (!Array.isArray(items) || items.length === 0) {
@@ -499,13 +499,37 @@ async function handleTransactions(
       external_hash: b.externalHash ?? null,
     }))
 
-    const { data, error } = await sb
-      .from('transactions')
-      .insert(rows)
-      .select()
-    if (error) throw error
+    // Insert in chunks to avoid timeouts and payload limits
+    const CHUNK_SIZE = 50
+    let insertedCount = 0
+    const errors: string[] = []
 
-    return created(res, data)
+    for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+      const chunk = rows.slice(i, i + CHUNK_SIZE)
+      const { error } = await sb
+        .from('transactions')
+        .insert(chunk)
+      if (error) {
+        errors.push(`Chunk ${Math.floor(i / CHUNK_SIZE) + 1}: ${error.message}`)
+      } else {
+        insertedCount += chunk.length
+      }
+    }
+
+    if (errors.length > 0 && insertedCount === 0) {
+      return res.status(500).json({
+        error: 'Import failed',
+        message: errors.join('; '),
+        data: { inserted: 0, failed: rows.length, errors },
+      })
+    }
+
+    return created(res, {
+      inserted: insertedCount,
+      failed: rows.length - insertedCount,
+      total: rows.length,
+      errors: errors.length > 0 ? errors : undefined,
+    })
   }
 
   if (method === 'POST') {
