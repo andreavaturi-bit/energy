@@ -135,14 +135,14 @@ export const transactionsApi = {
   /** Create a transfer pair (transfer_out + transfer_in) atomically */
   createTransfer: (data: TransferPayload) =>
     api.post<{ transferOut: Transaction; transferIn: Transaction }>(
-      '/transactions?action=transfer',
-      data,
+      '/transactions',
+      { ...data, _action: 'transfer' },
     ),
   /** Update both sides of a transfer pair */
   updateTransfer: (id: string, data: TransferPayload) =>
     api.put<{ updated: boolean }>(
-      `/transactions/${id}?action=transfer`,
-      data,
+      `/transactions/${id}`,
+      { ...data, _action: 'transfer' },
     ),
 }
 

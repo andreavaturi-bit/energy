@@ -534,8 +534,10 @@ async function handleTransactions(
     })
   }
 
-  // POST /transactions?action=transfer — create a linked transfer pair
-  if (method === 'POST' && actionParam === 'transfer') {
+  // POST transfer — create a linked transfer pair
+  // Detect via query ?action=transfer OR body _action:'transfer'
+  const bodyAction = (req.body as Record<string, unknown>)?._action
+  if (method === 'POST' && (actionParam === 'transfer' || bodyAction === 'transfer')) {
     const b = req.body || {}
     if (!b.date || !b.amount || !b.fromContainerId || !b.toContainerId) {
       return badRequest(res, 'date, amount, fromContainerId e toContainerId sono obbligatori')
@@ -634,8 +636,10 @@ async function handleTransactions(
     return created(res, data)
   }
 
-  // PUT /transactions/:id?action=transfer — update both sides of a transfer pair
-  if ((method === 'PUT' || method === 'PATCH') && id && actionParam === 'transfer') {
+  // PUT transfer — update both sides of a transfer pair
+  // Detect via query ?action=transfer OR body _action:'transfer'
+  const putBodyAction = (req.body as Record<string, unknown>)?._action
+  if ((method === 'PUT' || method === 'PATCH') && id && (actionParam === 'transfer' || putBodyAction === 'transfer')) {
     const b = req.body || {}
     if (!b.fromContainerId || !b.toContainerId) {
       return badRequest(res, 'fromContainerId e toContainerId sono obbligatori')
