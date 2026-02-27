@@ -114,7 +114,7 @@ export const transactionsApi = {
     api.post<Transaction>('/transactions', data),
   batchCreate: (transactions: Partial<Transaction>[]) =>
     api.post<{ inserted: number; failed: number; total: number; errors?: string[] }>(
-      '/transactions/batch',
+      '/transactions?action=batch',
       { transactions },
     ),
   update: (id: string, data: Partial<Transaction> & { tagIds?: string[] }) =>

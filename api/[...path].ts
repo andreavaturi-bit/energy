@@ -469,8 +469,10 @@ async function handleTransactions(
     return ok(res, { ...row, tags })
   }
 
-  // POST /transactions/batch — bulk import (chunked)
-  if (method === 'POST' && id === 'batch') {
+  // POST /transactions?action=batch — bulk import (chunked)
+  const params = (req.query || {}) as Record<string, string | string[]>
+  const actionParam = Array.isArray(params.action) ? params.action[0] : params.action
+  if (method === 'POST' && actionParam === 'batch') {
     const items = req.body?.transactions as unknown[]
     if (!Array.isArray(items) || items.length === 0) {
       return badRequest(res, 'transactions array is required and must not be empty')
