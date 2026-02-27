@@ -110,7 +110,7 @@ export const PRESET_PROFILES: Omit<ImportProfile, 'id' | 'containerId' | 'create
     name: 'American Express (CSV)',
     fileType: 'csv',
     delimiter: ',',
-    dateFormat: 'DD/MM/YYYY',
+    dateFormat: 'MM/DD/YYYY',
     decimalSeparator: ',',
     thousandsSeparator: '.',
     encoding: 'UTF-8',
