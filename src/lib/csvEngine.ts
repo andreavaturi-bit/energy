@@ -309,18 +309,21 @@ export function parseDate(value: string, format: string): string | null {
   const v = value.trim()
 
   try {
+    let mm: string, dd: string, yy: string
+
     switch (format) {
-      case 'DD/MM/YYYY': {
+      case 'DD/MM/YYYY':
+      case 'DD-MM-YYYY': {
         const parts = v.split(/[/\-.]/)
         if (parts.length < 3) return null
-        const [d, m, y] = parts
-        return `${y.padStart(4, '20')}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
+        ;[dd, mm, yy] = parts
+        break
       }
       case 'MM/DD/YYYY': {
         const parts = v.split(/[/\-.]/)
         if (parts.length < 3) return null
-        const [m, d, y] = parts
-        return `${y.padStart(4, '20')}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
+        ;[mm, dd, yy] = parts
+        break
       }
       case 'YYYY-MM-DD': {
         // Potrebbe avere timestamp: "2024-01-15 10:30:00"
@@ -328,15 +331,26 @@ export function parseDate(value: string, format: string): string | null {
         if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) return datePart
         return null
       }
-      case 'DD-MM-YYYY': {
-        const parts = v.split(/[/\-.]/)
-        if (parts.length < 3) return null
-        const [d, m, y] = parts
-        return `${y.padStart(4, '20')}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
-      }
       default:
         return null
     }
+
+    const month = parseInt(mm, 10)
+    const day = parseInt(dd, 10)
+
+    // Auto-correct swapped month/day: if month > 12 but day <= 12, swap them
+    if (month > 12 && day >= 1 && day <= 12) {
+      const tmp = mm
+      mm = dd
+      dd = tmp
+    }
+
+    // Validate
+    const m = parseInt(mm, 10)
+    const d = parseInt(dd, 10)
+    if (m < 1 || m > 12 || d < 1 || d > 31) return null
+
+    return `${yy.padStart(4, '20')}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`
   } catch {
     return null
   }
