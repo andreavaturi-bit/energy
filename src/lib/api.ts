@@ -104,6 +104,18 @@ export interface TransactionListResponse {
   offset: number
 }
 
+export interface TransferPayload {
+  date: string
+  description?: string | null
+  amount: string
+  currency?: string
+  fromContainerId: string
+  toContainerId: string
+  status?: string
+  source?: string
+  notes?: string | null
+}
+
 export const transactionsApi = {
   list: (params?: Record<string, string>) => {
     const qs = params ? '?' + new URLSearchParams(params).toString() : ''
@@ -120,6 +132,18 @@ export const transactionsApi = {
   update: (id: string, data: Partial<Transaction> & { tagIds?: string[] }) =>
     api.put<Transaction>(`/transactions/${id}`, data),
   delete: (id: string) => api.delete(`/transactions/${id}`),
+  /** Create a transfer pair (transfer_out + transfer_in) atomically */
+  createTransfer: (data: TransferPayload) =>
+    api.post<{ transferOut: Transaction; transferIn: Transaction }>(
+      '/transactions?action=transfer',
+      data,
+    ),
+  /** Update both sides of a transfer pair */
+  updateTransfer: (id: string, data: TransferPayload) =>
+    api.put<{ updated: boolean }>(
+      `/transactions/${id}?action=transfer`,
+      data,
+    ),
 }
 
 // -- Recurrences --

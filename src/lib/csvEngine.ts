@@ -524,6 +524,15 @@ export async function processCSVImport(
 /**
  * Converte le righe parsate in transazioni pronte per il database
  */
+/**
+ * Patterns in the description that indicate a credit-card settlement
+ * (addebito carta di credito sul conto corrente). These should be
+ * categorised as transfers, not income/expense.
+ */
+const TRANSFER_DESCRIPTION_PATTERNS = [
+  'ADDEBITO IN C/C SALVO BUON FINE',
+]
+
 export function convertToTransactions(
   rows: ParsedRow[],
   containerId: string,
@@ -532,7 +541,12 @@ export function convertToTransactions(
   return rows
     .filter(r => r.status === 'ready')
     .map(row => {
-      const type: TransactionType = row.mapped.amount >= 0 ? 'income' : 'expense'
+      const descUpper = (row.mapped.description || '').toUpperCase()
+      const isTransfer = TRANSFER_DESCRIPTION_PATTERNS.some(p => descUpper.includes(p))
+
+      const type: TransactionType = isTransfer
+        ? (row.mapped.amount >= 0 ? 'transfer_in' : 'transfer_out')
+        : (row.mapped.amount >= 0 ? 'income' : 'expense')
 
       return {
         date: row.mapped.date,
