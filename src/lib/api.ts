@@ -65,8 +65,9 @@ export const subjectsApi = {
   list: () => api.get<Subject[]>('/subjects'),
   get: (id: string) => api.get<Subject>(`/subjects/${id}`),
   create: (data: Partial<Subject>) => api.post<Subject>('/subjects', data),
-  update: (id: string, data: Partial<Subject>) => api.put<Subject>(`/subjects/${id}`, data),
-  delete: (id: string) => api.delete(`/subjects/${id}`),
+  update: (id: string, data: Partial<Subject>) =>
+    api.post<Subject>('/subjects', { ...data, _action: 'update', id }),
+  delete: (id: string) => api.post<{ deleted: boolean }>('/subjects', { _action: 'delete', id }),
 }
 
 // -- Containers --
@@ -74,8 +75,9 @@ export const containersApi = {
   list: () => api.get<(Container & { subject_name?: string })[]>('/containers'),
   get: (id: string) => api.get<Container>(`/containers/${id}`),
   create: (data: Partial<Container>) => api.post<Container>('/containers', data),
-  update: (id: string, data: Partial<Container>) => api.put<Container>(`/containers/${id}`, data),
-  delete: (id: string) => api.delete(`/containers/${id}`),
+  update: (id: string, data: Partial<Container>) =>
+    api.post<Container>('/containers', { ...data, _action: 'update', id }),
+  delete: (id: string) => api.post<{ deleted: boolean }>('/containers', { _action: 'delete', id }),
 }
 
 // -- Counterparties --
@@ -83,8 +85,9 @@ export const counterpartiesApi = {
   list: () => api.get<Counterparty[]>('/counterparties'),
   get: (id: string) => api.get<Counterparty>(`/counterparties/${id}`),
   create: (data: Partial<Counterparty>) => api.post<Counterparty>('/counterparties', data),
-  update: (id: string, data: Partial<Counterparty>) => api.put<Counterparty>(`/counterparties/${id}`, data),
-  delete: (id: string) => api.delete(`/counterparties/${id}`),
+  update: (id: string, data: Partial<Counterparty>) =>
+    api.post<Counterparty>('/counterparties', { ...data, _action: 'update', id }),
+  delete: (id: string) => api.post<{ deleted: boolean }>('/counterparties', { _action: 'delete', id }),
 }
 
 // -- Tags --
@@ -92,8 +95,9 @@ export const tagsApi = {
   list: () => api.get<Tag[]>('/tags'),
   get: (id: string) => api.get<Tag>(`/tags/${id}`),
   create: (data: Partial<Tag>) => api.post<Tag>('/tags', data),
-  update: (id: string, data: Partial<Tag>) => api.put<Tag>(`/tags/${id}`, data),
-  delete: (id: string) => api.delete(`/tags/${id}`),
+  update: (id: string, data: Partial<Tag>) =>
+    api.post<Tag>('/tags', { ...data, _action: 'update', id }),
+  delete: (id: string) => api.post<{ deleted: boolean }>('/tags', { _action: 'delete', id }),
 }
 
 // -- Transactions --
@@ -152,8 +156,9 @@ export const recurrencesApi = {
   list: () => api.get<Recurrence[]>('/recurrences'),
   get: (id: string) => api.get<Recurrence>(`/recurrences/${id}`),
   create: (data: Partial<Recurrence>) => api.post<Recurrence>('/recurrences', data),
-  update: (id: string, data: Partial<Recurrence>) => api.put<Recurrence>(`/recurrences/${id}`, data),
-  delete: (id: string) => api.delete(`/recurrences/${id}`),
+  update: (id: string, data: Partial<Recurrence>) =>
+    api.post<Recurrence>('/recurrences', { ...data, _action: 'update', id }),
+  delete: (id: string) => api.post<{ deleted: boolean }>('/recurrences', { _action: 'delete', id }),
 }
 
 // -- Budget --
@@ -180,11 +185,12 @@ export const budgetApi = {
   createPeriod: (data: { name: string; startDate: string; endDate: string }) =>
     api.post('/budget', data),
   updatePeriod: (id: string, data: Record<string, unknown>) =>
-    api.put(`/budget/${id}`, data),
-  deletePeriod: (id: string) => api.delete(`/budget/${id}`),
+    api.post('/budget', { ...data, _action: 'update', id }),
+  deletePeriod: (id: string) => api.post<{ deleted: boolean }>('/budget', { _action: 'delete', id }),
   createAllocation: (data: { periodId: string; tagId?: string; allocatedAmount: string; currency?: string }) =>
     api.post('/budget/allocations', data),
-  deleteAllocation: (id: string) => api.delete(`/budget/allocations/${id}`),
+  deleteAllocation: (id: string) =>
+    api.post<{ deleted: boolean }>('/budget', { _action: 'delete-allocation', id }),
 }
 
 // -- Stats (Dashboard) --

@@ -41,6 +41,37 @@ async function handleSubjects(
     return ok(res, data)
   }
 
+  // POST-based actions (update/delete via POST to avoid Vercel multi-segment path 404)
+  const bodyAction = (req.body as Record<string, unknown>)?._action
+
+  if (method === 'POST' && bodyAction === 'update') {
+    const b = req.body || {}
+    const subjectId = b.id as string
+    if (!subjectId) return badRequest(res, 'id è obbligatorio')
+    const update: Record<string, unknown> = { updated_at: new Date().toISOString() }
+    if (b.type !== undefined) update.type = b.type
+    if (b.name !== undefined) update.name = b.name
+    if (b.legalForm !== undefined) update.legal_form = b.legalForm
+    if (b.taxId !== undefined) update.tax_id = b.taxId
+    if (b.country !== undefined) update.country = b.country
+    if (b.role !== undefined) update.role = b.role
+    if (b.parentSubjectId !== undefined) update.parent_subject_id = b.parentSubjectId
+    if (b.notes !== undefined) update.notes = b.notes
+    if (b.isActive !== undefined) update.is_active = b.isActive
+
+    const { data, error } = await sb.from('subjects').update(update).eq('id', subjectId).select().single()
+    if (error || !data) return notFound(res, 'Soggetto non trovato')
+    return ok(res, data)
+  }
+
+  if (method === 'POST' && bodyAction === 'delete') {
+    const subjectId = (req.body as Record<string, unknown>)?.id as string
+    if (!subjectId) return badRequest(res, 'id è obbligatorio')
+    const { data, error } = await sb.from('subjects').delete().eq('id', subjectId).select('id').single()
+    if (error || !data) return notFound(res, 'Soggetto non trovato')
+    return ok(res, { deleted: true, id: subjectId })
+  }
+
   if (method === 'POST') {
     const b = req.body || {}
     if (!b.name || !b.type) return badRequest(res, 'name e type sono obbligatori')
@@ -76,12 +107,7 @@ async function handleSubjects(
     if (b.notes !== undefined) update.notes = b.notes
     if (b.isActive !== undefined) update.is_active = b.isActive
 
-    const { data, error } = await sb
-      .from('subjects')
-      .update(update)
-      .eq('id', id)
-      .select()
-      .single()
+    const { data, error } = await sb.from('subjects').update(update).eq('id', id).select().single()
     if (error || !data) return notFound(res, 'Soggetto non trovato')
     return ok(res, data)
   }
@@ -153,6 +179,46 @@ async function handleContainers(
     return ok(res, { ...rest, subject_name: subjects?.name ?? null })
   }
 
+  const bodyAction = (req.body as Record<string, unknown>)?._action
+
+  if (method === 'POST' && bodyAction === 'update') {
+    const b = req.body || {}
+    const cId = b.id as string
+    if (!cId) return badRequest(res, 'id è obbligatorio')
+    const update: Record<string, unknown> = { updated_at: new Date().toISOString() }
+    if (b.subjectId !== undefined) update.subject_id = b.subjectId
+    if (b.name !== undefined) update.name = b.name
+    if (b.type !== undefined) update.type = b.type
+    if (b.provider !== undefined) update.provider = b.provider
+    if (b.currency !== undefined) update.currency = b.currency
+    if (b.isMultiCurrency !== undefined) update.is_multi_currency = b.isMultiCurrency
+    if (b.initialBalance !== undefined) update.initial_balance = b.initialBalance
+    if (b.billingDay !== undefined) update.billing_day = b.billingDay
+    if (b.linkedContainerId !== undefined) update.linked_container_id = b.linkedContainerId
+    if (b.icon !== undefined) update.icon = b.icon
+    if (b.color !== undefined) update.color = b.color
+    if (b.sortOrder !== undefined) update.sort_order = b.sortOrder
+    if (b.isPinned !== undefined) update.is_pinned = b.isPinned
+    if (b.isActive !== undefined) update.is_active = b.isActive
+    if (b.notes !== undefined) update.notes = b.notes
+
+    const { data, error } = await sb.from('containers').update(update).eq('id', cId).select().single()
+    if (error || !data) return notFound(res, 'Contenitore non trovato')
+    return ok(res, data)
+  }
+
+  if (method === 'POST' && bodyAction === 'delete') {
+    const cId = (req.body as Record<string, unknown>)?.id as string
+    if (!cId) return badRequest(res, 'id è obbligatorio')
+    const { count } = await sb.from('transactions').select('id', { count: 'exact', head: true }).eq('container_id', cId)
+    if (count && count > 0) {
+      return badRequest(res, `Impossibile eliminare: ci sono ${count} transazioni collegate a questo contenitore.`)
+    }
+    const { data, error } = await sb.from('containers').delete().eq('id', cId).select('id').single()
+    if (error || !data) return notFound(res, 'Contenitore non trovato')
+    return ok(res, { deleted: true, id: cId })
+  }
+
   if (method === 'POST') {
     const b = req.body || {}
     if (!b.name || !b.type || !b.subjectId) return badRequest(res, 'name, type e subjectId sono obbligatori')
@@ -202,22 +268,13 @@ async function handleContainers(
     if (b.isActive !== undefined) update.is_active = b.isActive
     if (b.notes !== undefined) update.notes = b.notes
 
-    const { data, error } = await sb
-      .from('containers')
-      .update(update)
-      .eq('id', id)
-      .select()
-      .single()
+    const { data, error } = await sb.from('containers').update(update).eq('id', id).select().single()
     if (error || !data) return notFound(res, 'Contenitore non trovato')
     return ok(res, data)
   }
 
   if (method === 'DELETE' && id) {
-    // Check for linked transactions first
-    const { count } = await sb
-      .from('transactions')
-      .select('id', { count: 'exact', head: true })
-      .eq('container_id', id)
+    const { count } = await sb.from('transactions').select('id', { count: 'exact', head: true }).eq('container_id', id)
     if (count && count > 0) {
       return badRequest(res, `Impossibile eliminare: ci sono ${count} transazioni collegate a questo contenitore.`)
     }
@@ -253,6 +310,32 @@ async function handleCounterparties(
     return ok(res, data)
   }
 
+  const bodyAction = (req.body as Record<string, unknown>)?._action
+
+  if (method === 'POST' && bodyAction === 'update') {
+    const b = req.body || {}
+    const cpId = b.id as string
+    if (!cpId) return badRequest(res, 'id è obbligatorio')
+    const update: Record<string, unknown> = { updated_at: new Date().toISOString() }
+    if (b.name !== undefined) update.name = b.name
+    if (b.type !== undefined) update.type = b.type
+    if (b.defaultCategory !== undefined) update.default_category = b.defaultCategory
+    if (b.notes !== undefined) update.notes = b.notes
+    if (b.isActive !== undefined) update.is_active = b.isActive
+
+    const { data, error } = await sb.from('counterparties').update(update).eq('id', cpId).select().single()
+    if (error || !data) return notFound(res, 'Controparte non trovata')
+    return ok(res, data)
+  }
+
+  if (method === 'POST' && bodyAction === 'delete') {
+    const cpId = (req.body as Record<string, unknown>)?.id as string
+    if (!cpId) return badRequest(res, 'id è obbligatorio')
+    const { data, error } = await sb.from('counterparties').delete().eq('id', cpId).select('id').single()
+    if (error || !data) return notFound(res, 'Controparte non trovata')
+    return ok(res, { deleted: true, id: cpId })
+  }
+
   if (method === 'POST') {
     const b = req.body || {}
     if (!b.name) return badRequest(res, 'name è obbligatorio')
@@ -280,12 +363,7 @@ async function handleCounterparties(
     if (b.notes !== undefined) update.notes = b.notes
     if (b.isActive !== undefined) update.is_active = b.isActive
 
-    const { data, error } = await sb
-      .from('counterparties')
-      .update(update)
-      .eq('id', id)
-      .select()
-      .single()
+    const { data, error } = await sb.from('counterparties').update(update).eq('id', id).select().single()
     if (error || !data) return notFound(res, 'Controparte non trovata')
     return ok(res, data)
   }
@@ -323,6 +401,33 @@ async function handleTags(
     return ok(res, data)
   }
 
+  const bodyAction = (req.body as Record<string, unknown>)?._action
+
+  if (method === 'POST' && bodyAction === 'update') {
+    const b = req.body || {}
+    const tagId = b.id as string
+    if (!tagId) return badRequest(res, 'id è obbligatorio')
+    const update: Record<string, unknown> = {}
+    if (b.name !== undefined) update.name = b.name
+    if (b.parentId !== undefined) update.parent_id = b.parentId
+    if (b.type !== undefined) update.type = b.type
+    if (b.color !== undefined) update.color = b.color
+    if (b.icon !== undefined) update.icon = b.icon
+    if (b.isActive !== undefined) update.is_active = b.isActive
+
+    const { data, error } = await sb.from('tags').update(update).eq('id', tagId).select().single()
+    if (error || !data) return notFound(res, 'Tag non trovato')
+    return ok(res, data)
+  }
+
+  if (method === 'POST' && bodyAction === 'delete') {
+    const tagId = (req.body as Record<string, unknown>)?.id as string
+    if (!tagId) return badRequest(res, 'id è obbligatorio')
+    const { data, error } = await sb.from('tags').delete().eq('id', tagId).select('id').single()
+    if (error || !data) return notFound(res, 'Tag non trovato')
+    return ok(res, { deleted: true, id: tagId })
+  }
+
   if (method === 'POST') {
     const b = req.body || {}
     if (!b.name || !b.type) return badRequest(res, 'name e type sono obbligatori')
@@ -352,12 +457,7 @@ async function handleTags(
     if (b.icon !== undefined) update.icon = b.icon
     if (b.isActive !== undefined) update.is_active = b.isActive
 
-    const { data, error } = await sb
-      .from('tags')
-      .update(update)
-      .eq('id', id)
-      .select()
-      .single()
+    const { data, error } = await sb.from('tags').update(update).eq('id', id).select().single()
     if (error || !data) return notFound(res, 'Tag non trovato')
     return ok(res, data)
   }
@@ -1049,6 +1149,45 @@ async function handleRecurrences(
     return ok(res, row)
   }
 
+  const bodyAction = (req.body as Record<string, unknown>)?._action
+
+  if (method === 'POST' && bodyAction === 'update') {
+    const b = req.body || {}
+    const recId = b.id as string
+    if (!recId) return badRequest(res, 'id è obbligatorio')
+    const update: Record<string, unknown> = { updated_at: new Date().toISOString() }
+    if (b.description !== undefined) update.description = b.description
+    if (b.frequency !== undefined) update.frequency = b.frequency
+    if (b.intervalDays !== undefined) update.interval_days = b.intervalDays
+    if (b.dayOfMonth !== undefined) update.day_of_month = b.dayOfMonth
+    if (b.dayOfWeek !== undefined) update.day_of_week = b.dayOfWeek
+    if (b.businessDaysOnly !== undefined) update.business_days_only = b.businessDaysOnly
+    if (b.amount !== undefined) update.amount = b.amount
+    if (b.amountIsEstimate !== undefined) update.amount_is_estimate = b.amountIsEstimate
+    if (b.currency !== undefined) update.currency = b.currency
+    if (b.containerId !== undefined) update.container_id = b.containerId
+    if (b.counterpartyId !== undefined) update.counterparty_id = b.counterpartyId
+    if (b.type !== undefined) update.type = b.type
+    if (b.sharedWithSubjectId !== undefined) update.shared_with_subject_id = b.sharedWithSubjectId
+    if (b.sharePercentage !== undefined) update.share_percentage = b.sharePercentage
+    if (b.startDate !== undefined) update.start_date = b.startDate
+    if (b.endDate !== undefined) update.end_date = b.endDate
+    if (b.reminderDaysBefore !== undefined) update.reminder_days_before = b.reminderDaysBefore
+    if (b.isActive !== undefined) update.is_active = b.isActive
+
+    const { data, error } = await sb.from('recurrences').update(update).eq('id', recId).select().single()
+    if (error || !data) return notFound(res, 'Ricorrenza non trovata')
+    return ok(res, data)
+  }
+
+  if (method === 'POST' && bodyAction === 'delete') {
+    const recId = (req.body as Record<string, unknown>)?.id as string
+    if (!recId) return badRequest(res, 'id è obbligatorio')
+    const { data, error } = await sb.from('recurrences').delete().eq('id', recId).select('id').single()
+    if (error || !data) return notFound(res, 'Ricorrenza non trovata')
+    return ok(res, { deleted: true, id: recId })
+  }
+
   if (method === 'POST') {
     const b = req.body || {}
     if (!b.description || !b.frequency || !b.type || !b.startDate) {
@@ -1104,12 +1243,7 @@ async function handleRecurrences(
     if (b.reminderDaysBefore !== undefined) update.reminder_days_before = b.reminderDaysBefore
     if (b.isActive !== undefined) update.is_active = b.isActive
 
-    const { data, error } = await sb
-      .from('recurrences')
-      .update(update)
-      .eq('id', id)
-      .select()
-      .single()
+    const { data, error } = await sb.from('recurrences').update(update).eq('id', id).select().single()
     if (error || !data) return notFound(res, 'Ricorrenza non trovata')
     return ok(res, data)
   }
@@ -1245,7 +1379,41 @@ async function handleBudget(
     return ok(res, { ...period, allocations: flatAllocs })
   }
 
-  if (method === 'POST' && !periodId) {
+  // POST-based actions for budget (update/delete via POST to avoid Vercel multi-segment path 404)
+  const bodyAction = (req.body as Record<string, unknown>)?._action
+
+  if (method === 'POST' && bodyAction === 'update') {
+    const b = req.body || {}
+    const pId = b.id as string
+    if (!pId) return badRequest(res, 'id è obbligatorio')
+    const update: Record<string, unknown> = {}
+    if (b.name !== undefined) update.name = b.name
+    if (b.startDate !== undefined) update.start_date = b.startDate
+    if (b.endDate !== undefined) update.end_date = b.endDate
+    if (b.isActive !== undefined) update.is_active = b.isActive
+
+    const { data, error } = await sb.from('budget_periods').update(update).eq('id', pId).select().single()
+    if (error || !data) return notFound(res, 'Periodo non trovato')
+    return ok(res, data)
+  }
+
+  if (method === 'POST' && bodyAction === 'delete') {
+    const pId = (req.body as Record<string, unknown>)?.id as string
+    if (!pId) return badRequest(res, 'id è obbligatorio')
+    const { data, error } = await sb.from('budget_periods').delete().eq('id', pId).select('id').single()
+    if (error || !data) return notFound(res, 'Periodo non trovato')
+    return ok(res, { deleted: true, id: pId })
+  }
+
+  if (method === 'POST' && bodyAction === 'delete-allocation') {
+    const allocId = (req.body as Record<string, unknown>)?.id as string
+    if (!allocId) return badRequest(res, 'id è obbligatorio')
+    const { data, error } = await sb.from('budget_allocations').delete().eq('id', allocId).select('id').single()
+    if (error || !data) return notFound(res, 'Allocazione non trovata')
+    return ok(res, { deleted: true, id: allocId })
+  }
+
+  if (method === 'POST' && !periodId && !bodyAction) {
     const b = req.body || {}
     if (!b.name || !b.startDate || !b.endDate) return badRequest(res, 'name, startDate e endDate sono obbligatori')
     const { data, error } = await sb
@@ -1270,12 +1438,7 @@ async function handleBudget(
     if (b.endDate !== undefined) update.end_date = b.endDate
     if (b.isActive !== undefined) update.is_active = b.isActive
 
-    const { data, error } = await sb
-      .from('budget_periods')
-      .update(update)
-      .eq('id', periodId)
-      .select()
-      .single()
+    const { data, error } = await sb.from('budget_periods').update(update).eq('id', periodId).select().single()
     if (error || !data) return notFound(res, 'Periodo non trovato')
     return ok(res, data)
   }
