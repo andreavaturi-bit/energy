@@ -397,28 +397,33 @@ export function Transactions() {
   ])
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
 
-  // Debounce search text (300ms) to avoid firing API calls on every keystroke
-  const [debouncedSearch, setDebouncedSearch] = useState(searchText)
+  // Debounce ALL filter values (300ms) so that date pickers, search input,
+  // and dropdowns never trigger an API call while the user is still interacting.
+  const [debouncedFilters, setDebouncedFilters] = useState({
+    searchText, dateFrom, dateTo, containerId, typeFilter, statusFilter,
+  })
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => {
-    debounceRef.current = setTimeout(() => setDebouncedSearch(searchText), 300)
+    debounceRef.current = setTimeout(() => {
+      setDebouncedFilters({ searchText, dateFrom, dateTo, containerId, typeFilter, statusFilter })
+    }, 300)
     return () => clearTimeout(debounceRef.current)
-  }, [searchText])
+  }, [searchText, dateFrom, dateTo, containerId, typeFilter, statusFilter])
 
-  // ── Build API query params from filter state ───────────────
+  // ── Build API query params from debounced filter state ─────
   const queryParams = useMemo(() => {
     const params: Record<string, string> = {
       limit: '500',
       offset: '0',
     }
-    if (debouncedSearch) params.search = debouncedSearch
-    if (dateFrom) params.dateFrom = dateFrom
-    if (dateTo) params.dateTo = dateTo
-    if (containerId) params.containerId = containerId
-    if (typeFilter) params.type = typeFilter
-    if (statusFilter) params.status = statusFilter
+    if (debouncedFilters.searchText) params.search = debouncedFilters.searchText
+    if (debouncedFilters.dateFrom) params.dateFrom = debouncedFilters.dateFrom
+    if (debouncedFilters.dateTo) params.dateTo = debouncedFilters.dateTo
+    if (debouncedFilters.containerId) params.containerId = debouncedFilters.containerId
+    if (debouncedFilters.typeFilter) params.type = debouncedFilters.typeFilter
+    if (debouncedFilters.statusFilter) params.status = debouncedFilters.statusFilter
     return params
-  }, [debouncedSearch, dateFrom, dateTo, containerId, typeFilter, statusFilter])
+  }, [debouncedFilters])
 
   // ── Data hooks ─────────────────────────────────────────────
   const { data: txData, isLoading: txLoading, error: txError } = useTransactions(queryParams)
