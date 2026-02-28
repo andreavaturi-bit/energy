@@ -46,12 +46,15 @@ interface CustomProfile {
   thousandsSeparator: string
   skipRows: number
   amountInverted: boolean
+  separateAmountColumns: boolean
 }
 
 interface ColumnMapping {
   date: string
   description: string
   amount: string
+  amountIn: string
+  amountOut: string
   currency: string
   valueDate: string
   externalId: string
@@ -99,10 +102,21 @@ const THOUSANDS_OPTIONS = [
   { value: '', label: 'Nessuno' },
 ]
 
-const MAPPING_FIELDS: { key: keyof ColumnMapping; label: string; required: boolean }[] = [
+const MAPPING_FIELDS_SINGLE: { key: keyof ColumnMapping; label: string; required: boolean }[] = [
   { key: 'date', label: 'Data', required: true },
   { key: 'description', label: 'Descrizione', required: true },
   { key: 'amount', label: 'Importo', required: true },
+  { key: 'currency', label: 'Valuta', required: false },
+  { key: 'valueDate', label: 'Data Valuta', required: false },
+  { key: 'externalId', label: 'ID Esterno', required: false },
+  { key: 'notes', label: 'Note', required: false },
+]
+
+const MAPPING_FIELDS_SPLIT: { key: keyof ColumnMapping; label: string; required: boolean }[] = [
+  { key: 'date', label: 'Data', required: true },
+  { key: 'description', label: 'Descrizione', required: true },
+  { key: 'amountIn', label: 'Accrediti (Entrate)', required: true },
+  { key: 'amountOut', label: 'Addebiti (Uscite)', required: true },
   { key: 'currency', label: 'Valuta', required: false },
   { key: 'valueDate', label: 'Data Valuta', required: false },
   { key: 'externalId', label: 'ID Esterno', required: false },
@@ -224,11 +238,14 @@ export function ImportData() {
     thousandsSeparator: '.',
     skipRows: 0,
     amountInverted: false,
+    separateAmountColumns: false,
   })
   const [columnMapping, setColumnMapping] = useState<ColumnMapping>({
     date: '',
     description: '',
     amount: '',
+    amountIn: '',
+    amountOut: '',
     currency: '',
     valueDate: '',
     externalId: '',
@@ -309,6 +326,8 @@ export function ImportData() {
         date: mapping.date || '',
         description: mapping.description || '',
         amount: mapping.amount || '',
+        amountIn: detected.incomeColumn || '',
+        amountOut: detected.expenseColumn || '',
         currency: mapping.currency || '',
         valueDate: mapping.valueDate || '',
         externalId: mapping.externalId || '',
@@ -322,6 +341,7 @@ export function ImportData() {
         thousandsSeparator: detected.thousandsSeparator,
         skipRows: detected.skipRows,
         amountInverted: detected.amountInverted,
+        separateAmountColumns: detected.separateAmountColumns,
       })
     } else {
       setAutoDetectedProfile(null)
@@ -330,6 +350,8 @@ export function ImportData() {
         date: '',
         description: '',
         amount: '',
+        amountIn: '',
+        amountOut: '',
         currency: '',
         valueDate: '',
         externalId: '',
@@ -342,6 +364,7 @@ export function ImportData() {
         thousandsSeparator: '.',
         skipRows: 0,
         amountInverted: false,
+        separateAmountColumns: false,
       })
     }
 
@@ -358,6 +381,8 @@ export function ImportData() {
         date: mapping.date || '',
         description: mapping.description || '',
         amount: mapping.amount || '',
+        amountIn: profile.incomeColumn || '',
+        amountOut: profile.expenseColumn || '',
         currency: mapping.currency || '',
         valueDate: mapping.valueDate || '',
         externalId: mapping.externalId || '',
@@ -370,6 +395,7 @@ export function ImportData() {
         thousandsSeparator: profile.thousandsSeparator,
         skipRows: profile.skipRows,
         amountInverted: profile.amountInverted,
+        separateAmountColumns: profile.separateAmountColumns,
       })
     },
     [],
@@ -384,6 +410,8 @@ export function ImportData() {
 
     const src = profileSelection?.type === 'custom' ? customProfile : (base ?? customProfile)
 
+    const isSplit = src.separateAmountColumns
+
     return {
       name: base?.name || 'Personalizzato',
       fileType: 'csv',
@@ -396,15 +424,18 @@ export function ImportData() {
       columnMapping: {
         date: columnMapping.date,
         description: columnMapping.description,
-        amount: columnMapping.amount,
+        ...(!isSplit ? { amount: columnMapping.amount } : {}),
         ...(columnMapping.currency ? { currency: columnMapping.currency } : {}),
         ...(columnMapping.valueDate ? { valueDate: columnMapping.valueDate } : {}),
         ...(columnMapping.externalId ? { externalId: columnMapping.externalId } : {}),
         ...(columnMapping.notes ? { notes: columnMapping.notes } : {}),
       },
       amountInverted: src.amountInverted,
-      separateAmountColumns: false,
-      dedupColumns: [columnMapping.date, columnMapping.description, columnMapping.amount].filter(Boolean),
+      separateAmountColumns: isSplit,
+      ...(isSplit ? { incomeColumn: columnMapping.amountIn, expenseColumn: columnMapping.amountOut } : {}),
+      dedupColumns: isSplit
+        ? [columnMapping.date, columnMapping.description, columnMapping.amountIn, columnMapping.amountOut].filter(Boolean)
+        : [columnMapping.date, columnMapping.description, columnMapping.amount].filter(Boolean),
     }
   }, [profileSelection, customProfile, columnMapping])
 
@@ -481,11 +512,14 @@ export function ImportData() {
       date: '',
       description: '',
       amount: '',
+      amountIn: '',
+      amountOut: '',
       currency: '',
       valueDate: '',
       externalId: '',
       notes: '',
     })
+    setCustomProfile(p => ({ ...p, separateAmountColumns: false }))
     if (fileInputRef.current) fileInputRef.current.value = ''
   }, [])
 
@@ -494,11 +528,14 @@ export function ImportData() {
   // ============================================================
 
   const step1Valid = file !== null && containerId !== ''
+  const amountValid = customProfile.separateAmountColumns
+    ? columnMapping.amountIn !== '' && columnMapping.amountOut !== ''
+    : columnMapping.amount !== ''
   const step2Valid =
     profileSelection !== null &&
     columnMapping.date !== '' &&
     columnMapping.description !== '' &&
-    columnMapping.amount !== ''
+    amountValid
 
   // ============================================================
   // RENDER
@@ -881,6 +918,21 @@ export function ImportData() {
                     <span className="text-sm text-zinc-300">Importo invertito</span>
                   </label>
                 </div>
+
+                {/* Separate amount columns */}
+                <div className="flex items-end">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={customProfile.separateAmountColumns}
+                      onChange={(e) =>
+                        setCustomProfile((p) => ({ ...p, separateAmountColumns: e.target.checked }))
+                      }
+                      className="h-4 w-4 rounded border-zinc-600 bg-zinc-800 text-energy-500 focus:ring-energy-500"
+                    />
+                    <span className="text-sm text-zinc-300">Colonne separate Entrate/Uscite</span>
+                  </label>
+                </div>
               </div>
             </div>
           )}
@@ -890,9 +942,14 @@ export function ImportData() {
             <h2 className="mb-4 text-lg font-semibold text-zinc-100">Mappatura Colonne</h2>
             <p className="mb-4 text-xs text-zinc-500">
               Associa le colonne del CSV ai campi del sistema. I campi con * sono obbligatori.
+              {customProfile.separateAmountColumns && (
+                <span className="ml-1 text-energy-400">
+                  Modalità colonne separate attiva: mappa le colonne Accrediti e Addebiti.
+                </span>
+              )}
             </p>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {MAPPING_FIELDS.map(({ key, label, required }) => (
+              {(customProfile.separateAmountColumns ? MAPPING_FIELDS_SPLIT : MAPPING_FIELDS_SINGLE).map(({ key, label, required }) => (
                 <div key={key}>
                   <label className="mb-1 block text-xs font-medium text-zinc-400">
                     {label}

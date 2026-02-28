@@ -69,7 +69,7 @@ export interface ImportResult {
 
 export const PRESET_PROFILES: Omit<ImportProfile, 'id' | 'containerId' | 'createdAt' | 'updatedAt'>[] = [
   {
-    name: 'Intesa Sanpaolo',
+    name: 'Intesa Sanpaolo (colonna unica)',
     fileType: 'csv',
     delimiter: ';',
     dateFormat: 'DD/MM/YYYY',
@@ -86,6 +86,26 @@ export const PRESET_PROFILES: Omit<ImportProfile, 'id' | 'containerId' | 'create
     amountInverted: false,
     separateAmountColumns: false,
     dedupColumns: ['Data Contabile', 'Descrizione', 'Importo'],
+  },
+  {
+    name: 'Intesa Sanpaolo (Accrediti/Addebiti)',
+    fileType: 'csv',
+    delimiter: ';',
+    dateFormat: 'DD/MM/YYYY',
+    decimalSeparator: ',',
+    thousandsSeparator: '.',
+    encoding: 'UTF-8',
+    skipRows: 0,
+    columnMapping: {
+      date: 'Data Contabile',
+      valueDate: 'Data Valuta',
+      description: 'Descrizione',
+    },
+    amountInverted: false,
+    separateAmountColumns: true,
+    incomeColumn: 'Accrediti',
+    expenseColumn: 'Addebiti',
+    dedupColumns: ['Data Contabile', 'Descrizione', 'Accrediti', 'Addebiti'],
   },
   {
     name: 'Revolut',
@@ -282,7 +302,10 @@ export function detectProfile(columns: string[]): typeof PRESET_PROFILES[number]
   const colSet = new Set(columns.map(c => c.toLowerCase().trim()))
 
   for (const profile of PRESET_PROFILES) {
-    const mappedCols = Object.values(profile.columnMapping)
+    const mappedCols = [...Object.values(profile.columnMapping)]
+    // Include income/expense column names for split-amount profiles
+    if (profile.incomeColumn) mappedCols.push(profile.incomeColumn)
+    if (profile.expenseColumn) mappedCols.push(profile.expenseColumn)
     if (mappedCols.length === 0) continue
 
     const matchCount = mappedCols.filter(col =>
