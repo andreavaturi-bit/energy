@@ -121,7 +121,8 @@ export const transactionsApi = {
     const qs = params ? '?' + new URLSearchParams(params).toString() : ''
     return api.get<TransactionListResponse>(`/transactions${qs}`)
   },
-  get: (id: string) => api.get<Transaction & { tags?: Tag[] }>(`/transactions/${id}`),
+  get: (id: string) => api.post<Transaction & { tags?: Tag[] }>(
+    '/transactions', { _action: 'get', id }),
   create: (data: Partial<Transaction> & { tagIds?: string[] }) =>
     api.post<Transaction>('/transactions', data),
   batchCreate: (transactions: Partial<Transaction>[]) =>
@@ -130,8 +131,8 @@ export const transactionsApi = {
       { transactions },
     ),
   update: (id: string, data: Partial<Transaction> & { tagIds?: string[] }) =>
-    api.put<Transaction>(`/transactions/${id}`, data),
-  delete: (id: string) => api.delete(`/transactions/${id}`),
+    api.post<Transaction>('/transactions', { ...data, _action: 'update', id }),
+  delete: (id: string) => api.post<{ deleted: boolean }>('/transactions', { _action: 'delete', id }),
   /** Create a transfer pair (transfer_out + transfer_in) atomically */
   createTransfer: (data: TransferPayload) =>
     api.post<{ transferOut: Transaction; transferIn: Transaction }>(

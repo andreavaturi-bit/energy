@@ -683,6 +683,105 @@ async function handleTransactions(
     return ok(res, { updated: true })
   }
 
+  // POST get-by-id — fetch a single transaction via POST to avoid multi-segment path issues
+  if (method === 'POST' && bodyAction === 'get') {
+    const txId = (req.body as Record<string, unknown>)?.id as string
+    if (!txId) return badRequest(res, 'id è obbligatorio')
+
+    const { data, error } = await sb
+      .from('transactions')
+      .select(
+        '*, containers(name, color), counterparties(name), subjects!transactions_shared_with_subject_id_subjects_id_fk(name)',
+      )
+      .eq('id', txId)
+      .single()
+    if (error || !data) return notFound(res, 'Transazione non trovata')
+
+    const { data: tagRows } = await sb
+      .from('transaction_tags')
+      .select('tags(*)')
+      .eq('transaction_id', txId)
+    const tags = (tagRows || []).map((r: Record<string, unknown>) => r.tags)
+
+    const row = { ...data } as Record<string, unknown>
+    const containers = row.containers as { name?: string; color?: string } | null
+    const counterparties = row.counterparties as { name?: string } | null
+    const subjects = row.subjects as { name?: string } | null
+    row.container_name = containers?.name ?? null
+    row.container_color = containers?.color ?? null
+    row.counterparty_name = counterparties?.name ?? null
+    row.shared_with_name = subjects?.name ?? null
+    delete row.containers
+    delete row.counterparties
+    delete row.subjects
+
+    return ok(res, { ...row, tags })
+  }
+
+  // POST update — update a transaction via POST to avoid multi-segment path issues
+  if (method === 'POST' && bodyAction === 'update') {
+    const b = req.body || {}
+    const txId = b.id as string
+    if (!txId) return badRequest(res, 'id è obbligatorio')
+
+    const update: Record<string, unknown> = { updated_at: new Date().toISOString() }
+    if (b.date !== undefined) update.date = b.date
+    if (b.valueDate !== undefined) update.value_date = b.valueDate
+    if (b.description !== undefined) update.description = b.description
+    if (b.notes !== undefined) update.notes = b.notes
+    if (b.amount !== undefined) update.amount = b.amount
+    if (b.currency !== undefined) update.currency = b.currency
+    if (b.amountEur !== undefined) update.amount_eur = b.amountEur
+    if (b.exchangeRate !== undefined) update.exchange_rate = b.exchangeRate
+    if (b.containerId !== undefined) update.container_id = b.containerId
+    if (b.counterpartyId !== undefined) update.counterparty_id = b.counterpartyId
+    if (b.type !== undefined) update.type = b.type
+    if (b.transferLinkedId !== undefined) update.transfer_linked_id = b.transferLinkedId
+    if (b.status !== undefined) update.status = b.status
+    if (b.sharedWithSubjectId !== undefined) update.shared_with_subject_id = b.sharedWithSubjectId
+    if (b.sharePercentage !== undefined) update.share_percentage = b.sharePercentage
+
+    const { data, error } = await sb
+      .from('transactions')
+      .update(update)
+      .eq('id', txId)
+      .select()
+      .single()
+    if (error || !data) return notFound(res, 'Transazione non trovata')
+
+    const tagIds = b.tagIds as string[] | undefined
+    if (tagIds !== undefined) {
+      await sb.from('transaction_tags').delete().eq('transaction_id', txId)
+      if (tagIds.length > 0) {
+        await sb.from('transaction_tags').insert(
+          tagIds.map((tagId: string) => ({ transaction_id: txId, tag_id: tagId })),
+        )
+      }
+    }
+
+    return ok(res, data)
+  }
+
+  // POST delete — delete a transaction via POST to avoid multi-segment path issues
+  if (method === 'POST' && bodyAction === 'delete') {
+    const txId = (req.body as Record<string, unknown>)?.id as string
+    if (!txId) return badRequest(res, 'id è obbligatorio')
+
+    // If this is part of a transfer pair, delete the linked side too
+    const { data: txToDelete } = await sb
+      .from('transactions')
+      .select('transfer_linked_id')
+      .eq('id', txId)
+      .single()
+    if (txToDelete?.transfer_linked_id) {
+      await sb.from('transactions').delete().eq('id', txToDelete.transfer_linked_id)
+    }
+
+    const { data, error } = await sb.from('transactions').delete().eq('id', txId).select('id').single()
+    if (error || !data) return notFound(res, 'Transazione non trovata')
+    return ok(res, { deleted: true, id: txId, linkedDeleted: !!txToDelete?.transfer_linked_id })
+  }
+
   if (method === 'POST') {
     const b = req.body || {}
     if (!b.date || !b.amount || !b.containerId || !b.type) {
