@@ -399,7 +399,7 @@ export function Transactions() {
 
   // Debounce search text (300ms) to avoid firing API calls on every keystroke
   const [debouncedSearch, setDebouncedSearch] = useState(searchText)
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>()
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => {
     debounceRef.current = setTimeout(() => setDebouncedSearch(searchText), 300)
     return () => clearTimeout(debounceRef.current)
