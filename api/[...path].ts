@@ -591,6 +591,98 @@ async function handleTransactions(
     })
   }
 
+  // POST update-transfer — update both sides of a transfer pair
+  // Uses POST instead of PUT to avoid Vercel routing issues with multi-segment paths
+  if (method === 'POST' && bodyAction === 'update-transfer') {
+    const b = req.body || {}
+    const txId = b.id as string
+    if (!txId || !b.fromContainerId || !b.toContainerId) {
+      return badRequest(res, 'id, fromContainerId e toContainerId sono obbligatori')
+    }
+
+    const now = new Date().toISOString()
+    const absAmount = b.amount ? Math.abs(parseFloat(b.amount)).toFixed(4) : undefined
+
+    // Fetch the existing transaction to find its linked pair
+    const { data: existingTx, error: fetchErr } = await sb
+      .from('transactions')
+      .select('id, type, transfer_linked_id')
+      .eq('id', txId)
+      .single()
+    if (fetchErr || !existingTx) return notFound(res, 'Transazione non trovata')
+
+    // Determine which side is transfer_out and which is transfer_in
+    let outId: string | null = null
+    let inId: string | null = null
+    if (existingTx.type === 'transfer_out') {
+      outId = txId
+      inId = existingTx.transfer_linked_id
+    } else if (existingTx.type === 'transfer_in') {
+      inId = txId
+      outId = existingTx.transfer_linked_id
+    } else {
+      // Converting a non-transfer to transfer: this becomes transfer_out
+      outId = txId
+    }
+
+    // Build common fields
+    const commonFields: Record<string, unknown> = { updated_at: now }
+    if (b.date !== undefined) commonFields.date = b.date
+    if (b.description !== undefined) commonFields.description = b.description
+    if (b.currency !== undefined) commonFields.currency = b.currency
+    if (b.status !== undefined) commonFields.status = b.status
+    if (b.notes !== undefined) commonFields.notes = b.notes
+
+    // Update transfer_out side
+    if (outId) {
+      const outUpdate = {
+        ...commonFields,
+        container_id: b.fromContainerId,
+        type: 'transfer_out',
+        ...(absAmount ? { amount: `-${absAmount}` } : {}),
+      }
+      const { error } = await sb.from('transactions').update(outUpdate).eq('id', outId)
+      if (error) throw error
+    }
+
+    // Update or create transfer_in side
+    if (inId) {
+      const inUpdate = {
+        ...commonFields,
+        container_id: b.toContainerId,
+        type: 'transfer_in',
+        ...(absAmount ? { amount: absAmount } : {}),
+      }
+      const { error } = await sb.from('transactions').update(inUpdate).eq('id', inId)
+      if (error) throw error
+    } else {
+      // No linked transaction exists — create the transfer_in side
+      const inInsert: Record<string, unknown> = {
+        date: b.date ?? null,
+        description: b.description ?? null,
+        notes: b.notes ?? null,
+        amount: absAmount ?? '0',
+        currency: b.currency ?? 'EUR',
+        container_id: b.toContainerId,
+        type: 'transfer_in',
+        status: b.status ?? 'completed',
+        source: 'manual',
+        transfer_linked_id: outId,
+      }
+      // Fill date from the existing out-side if not provided
+      if (!inInsert.date && outId) {
+        const { data: outData } = await sb.from('transactions').select('date').eq('id', outId).single()
+        inInsert.date = outData?.date ?? new Date().toISOString().slice(0, 10)
+      }
+      const { data: newIn, error } = await sb.from('transactions').insert(inInsert).select().single()
+      if (error) throw error
+      // Link the out side to the new in side
+      await sb.from('transactions').update({ transfer_linked_id: newIn.id }).eq('id', outId!)
+    }
+
+    return ok(res, { updated: true })
+  }
+
   if (method === 'POST') {
     const b = req.body || {}
     if (!b.date || !b.amount || !b.containerId || !b.type) {

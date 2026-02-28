@@ -140,9 +140,9 @@ export const transactionsApi = {
     ),
   /** Update both sides of a transfer pair */
   updateTransfer: (id: string, data: TransferPayload) =>
-    api.put<{ updated: boolean }>(
-      `/transactions/${id}`,
-      { ...data, _action: 'transfer' },
+    api.post<{ updated: boolean }>(
+      '/transactions',
+      { ...data, _action: 'update-transfer', id },
     ),
 }
 
