@@ -5,7 +5,7 @@
  * Data is fetched, cached, and auto-refreshed via TanStack Query.
  */
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import {
   subjectsApi,
   containersApi,
@@ -230,6 +230,7 @@ export function useTransactions(params?: Record<string, string>) {
         offset: data.offset,
       } as TransactionListResponse & { rows: Transaction[] }
     },
+    placeholderData: keepPreviousData,
   })
 }
 
