@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from 'react'
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react'
 import {
   useReactTable,
   getCoreRowModel,
@@ -397,20 +397,28 @@ export function Transactions() {
   ])
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
 
+  // Debounce search text (300ms) to avoid firing API calls on every keystroke
+  const [debouncedSearch, setDebouncedSearch] = useState(searchText)
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>()
+  useEffect(() => {
+    debounceRef.current = setTimeout(() => setDebouncedSearch(searchText), 300)
+    return () => clearTimeout(debounceRef.current)
+  }, [searchText])
+
   // ── Build API query params from filter state ───────────────
   const queryParams = useMemo(() => {
     const params: Record<string, string> = {
       limit: '500',
       offset: '0',
     }
-    if (searchText) params.search = searchText
+    if (debouncedSearch) params.search = debouncedSearch
     if (dateFrom) params.dateFrom = dateFrom
     if (dateTo) params.dateTo = dateTo
     if (containerId) params.containerId = containerId
     if (typeFilter) params.type = typeFilter
     if (statusFilter) params.status = statusFilter
     return params
-  }, [searchText, dateFrom, dateTo, containerId, typeFilter, statusFilter])
+  }, [debouncedSearch, dateFrom, dateTo, containerId, typeFilter, statusFilter])
 
   // ── Data hooks ─────────────────────────────────────────────
   const { data: txData, isLoading: txLoading, error: txError } = useTransactions(queryParams)
