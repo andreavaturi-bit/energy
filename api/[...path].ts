@@ -709,7 +709,9 @@ async function handleTransactions(
       return badRequest(res, 'transactions array is required and must not be empty')
     }
 
-    const rows = items.map((b: Record<string, unknown>) => ({
+    const rows = items.map((item: unknown) => {
+      const b = item as Record<string, unknown>
+      return {
       date: b.date,
       value_date: b.valueDate ?? null,
       description: b.description ?? null,
@@ -729,8 +731,8 @@ async function handleTransactions(
       installment_plan_id: b.installmentPlanId ?? null,
       installment_number: b.installmentNumber ?? null,
       external_id: b.externalId ?? null,
-      external_hash: b.externalHash ?? null,
-    }))
+      external_hash: (b.externalHash as string) ?? null,
+    }})
 
     // Dedup server-side: filter out rows whose external_hash already exists
     const hashesToCheck = rows
