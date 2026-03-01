@@ -569,9 +569,140 @@ async function handleTransactions(
     return ok(res, { ...row, tags })
   }
 
-  // POST /transactions?action=batch — bulk import (chunked)
+  // POST /transactions?action=batch — bulk import (chunked, with dedup)
   const params = (req.query || {}) as Record<string, string | string[]>
   const actionParam = Array.isArray(params.action) ? params.action[0] : params.action
+
+  // POST /transactions?action=check-hashes — check which hashes already exist in DB
+  if (method === 'POST' && actionParam === 'check-hashes') {
+    const b = req.body || {}
+    const containerId = b.containerId as string
+    const hashes = b.hashes as string[]
+    if (!containerId || !Array.isArray(hashes) || hashes.length === 0) {
+      return badRequest(res, 'containerId e hashes[] sono obbligatori')
+    }
+
+    // Query in chunks of 500 to avoid query size limits
+    const HASH_CHUNK = 500
+    const existingHashes: string[] = []
+    for (let i = 0; i < hashes.length; i += HASH_CHUNK) {
+      const chunk = hashes.slice(i, i + HASH_CHUNK)
+      const { data, error } = await sb
+        .from('transactions')
+        .select('external_hash')
+        .eq('container_id', containerId)
+        .in('external_hash', chunk)
+      if (error) throw error
+      if (data) {
+        existingHashes.push(...data.map((r: { external_hash: string }) => r.external_hash))
+      }
+    }
+
+    return ok(res, { existingHashes })
+  }
+
+  // POST /transactions?action=find-matches — find manual transactions matching imported ones
+  if (method === 'POST' && actionParam === 'find-matches') {
+    const b = req.body || {}
+    const containerId = b.containerId as string
+    const candidates = b.candidates as Array<{ date: string; amount: number; description: string }>
+    if (!containerId || !Array.isArray(candidates) || candidates.length === 0) {
+      return badRequest(res, 'containerId e candidates[] sono obbligatori')
+    }
+
+    // Find manual transactions in this container within ±5 days of any candidate date
+    const allDates = candidates.map(c => c.date)
+    const minDate = allDates.sort()[0]
+    const maxDate = allDates.sort().reverse()[0]
+
+    // Extend range by 5 days
+    const fromDate = new Date(minDate)
+    fromDate.setDate(fromDate.getDate() - 5)
+    const toDate = new Date(maxDate)
+    toDate.setDate(toDate.getDate() + 5)
+
+    const { data: manualTxs, error } = await sb
+      .from('transactions')
+      .select('id, date, description, amount, currency, type, status, source, counterparty_id, container_id')
+      .eq('container_id', containerId)
+      .eq('source', 'manual')
+      .neq('status', 'cancelled')
+      .gte('date', fromDate.toISOString().slice(0, 10))
+      .lte('date', toDate.toISOString().slice(0, 10))
+
+    if (error) throw error
+
+    // Return manual transactions for client-side matching
+    return ok(res, { manualTransactions: manualTxs || [] })
+  }
+
+  // POST /transactions?action=reconcile — merge a manual transaction with an imported one
+  if (method === 'POST' && actionParam === 'reconcile') {
+    const b = req.body || {}
+    const keepId = b.keepId as string
+    const removeId = b.removeId as string
+    if (!keepId || !removeId) return badRequest(res, 'keepId e removeId sono obbligatori')
+
+    // Fetch the transaction to remove (to grab its external_hash/external_id)
+    const { data: removeTx, error: fetchErr } = await sb
+      .from('transactions')
+      .select('external_hash, external_id, value_date')
+      .eq('id', removeId)
+      .single()
+    if (fetchErr || !removeTx) return notFound(res, 'Transazione da rimuovere non trovata')
+
+    // Update the kept transaction: copy dedup fields so future imports recognize it
+    const keepUpdate: Record<string, unknown> = { updated_at: new Date().toISOString() }
+    if (removeTx.external_hash) keepUpdate.external_hash = removeTx.external_hash
+    if (removeTx.external_id) keepUpdate.external_id = removeTx.external_id
+    if (removeTx.value_date) keepUpdate.value_date = removeTx.value_date
+
+    const { error: updateErr } = await sb.from('transactions').update(keepUpdate).eq('id', keepId)
+    if (updateErr) throw updateErr
+
+    // Delete the removed transaction
+    const { error: deleteErr } = await sb.from('transactions').delete().eq('id', removeId)
+    if (deleteErr) throw deleteErr
+
+    return ok(res, { reconciled: true, keptId: keepId, removedId: removeId })
+  }
+
+  // POST /transactions?action=reconcile-bulk — batch reconcile multiple pairs
+  if (method === 'POST' && actionParam === 'reconcile-bulk') {
+    const b = req.body || {}
+    const pairs = b.pairs as Array<{ keepId: string; removeId: string }>
+    if (!Array.isArray(pairs) || pairs.length === 0) {
+      return badRequest(res, 'pairs[] è obbligatorio')
+    }
+
+    let reconciledCount = 0
+    const errors: string[] = []
+
+    for (const pair of pairs) {
+      const { data: removeTx } = await sb
+        .from('transactions')
+        .select('external_hash, external_id, value_date')
+        .eq('id', pair.removeId)
+        .single()
+
+      if (!removeTx) {
+        errors.push(`Transazione ${pair.removeId} non trovata`)
+        continue
+      }
+
+      const keepUpdate: Record<string, unknown> = { updated_at: new Date().toISOString() }
+      if (removeTx.external_hash) keepUpdate.external_hash = removeTx.external_hash
+      if (removeTx.external_id) keepUpdate.external_id = removeTx.external_id
+      if (removeTx.value_date) keepUpdate.value_date = removeTx.value_date
+
+      await sb.from('transactions').update(keepUpdate).eq('id', pair.keepId)
+      await sb.from('transactions').delete().eq('id', pair.removeId)
+      reconciledCount++
+    }
+
+    return ok(res, { reconciled: reconciledCount, errors: errors.length > 0 ? errors : undefined })
+  }
+
   if (method === 'POST' && actionParam === 'batch') {
     const items = req.body?.transactions as unknown[]
     if (!Array.isArray(items) || items.length === 0) {
@@ -601,13 +732,47 @@ async function handleTransactions(
       external_hash: b.externalHash ?? null,
     }))
 
+    // Dedup server-side: filter out rows whose external_hash already exists
+    const hashesToCheck = rows
+      .map(r => r.external_hash)
+      .filter((h): h is string => h !== null && h !== undefined)
+    let existingHashSet = new Set<string>()
+
+    if (hashesToCheck.length > 0) {
+      const containerIds = [...new Set(rows.map(r => r.container_id).filter(Boolean))]
+      for (const cid of containerIds) {
+        const containerHashes = rows
+          .filter(r => r.container_id === cid && r.external_hash)
+          .map(r => r.external_hash as string)
+        if (containerHashes.length === 0) continue
+        for (let i = 0; i < containerHashes.length; i += 500) {
+          const chunk = containerHashes.slice(i, i + 500)
+          const { data } = await sb
+            .from('transactions')
+            .select('external_hash')
+            .eq('container_id', cid)
+            .in('external_hash', chunk)
+          if (data) {
+            data.forEach((r: { external_hash: string }) => existingHashSet.add(r.external_hash))
+          }
+        }
+      }
+    }
+
+    // Filter out duplicates
+    const dedupedRows = rows.filter(r => {
+      if (r.external_hash && existingHashSet.has(r.external_hash)) return false
+      return true
+    })
+    const skippedDuplicates = rows.length - dedupedRows.length
+
     // Insert in chunks to avoid timeouts and payload limits
     const CHUNK_SIZE = 50
     let insertedCount = 0
     const errors: string[] = []
 
-    for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
-      const chunk = rows.slice(i, i + CHUNK_SIZE)
+    for (let i = 0; i < dedupedRows.length; i += CHUNK_SIZE) {
+      const chunk = dedupedRows.slice(i, i + CHUNK_SIZE)
       const { error } = await sb
         .from('transactions')
         .insert(chunk)
@@ -618,17 +783,18 @@ async function handleTransactions(
       }
     }
 
-    if (errors.length > 0 && insertedCount === 0) {
+    if (errors.length > 0 && insertedCount === 0 && dedupedRows.length > 0) {
       return res.status(500).json({
         error: 'Import failed',
         message: errors.join('; '),
-        data: { inserted: 0, failed: rows.length, errors },
+        data: { inserted: 0, failed: dedupedRows.length, skippedDuplicates, errors },
       })
     }
 
     return created(res, {
       inserted: insertedCount,
-      failed: rows.length - insertedCount,
+      failed: dedupedRows.length - insertedCount,
+      skippedDuplicates,
       total: rows.length,
       errors: errors.length > 0 ? errors : undefined,
     })
@@ -1109,6 +1275,250 @@ async function handleRecurrences(
 ) {
   const sb = getSupabase()
   const method = req.method
+
+  // POST /recurrences { _action: 'detect' } — auto-detect recurring patterns from transactions
+  const bodyActionRec = (req.body as Record<string, unknown>)?._action
+  if (method === 'POST' && bodyActionRec === 'detect') {
+    const b = req.body || {}
+    const dateFrom = (b.dateFrom as string) || null
+    const dateTo = (b.dateTo as string) || null
+    const containerId = (b.containerId as string) || null
+    const minOccurrences = (b.minOccurrences as number) || 3
+
+    // Fetch completed transactions (non-transfer, non-cancelled)
+    let query = sb
+      .from('transactions')
+      .select('id, date, description, amount, currency, type, container_id, counterparty_id, source')
+      .neq('status', 'cancelled')
+      .not('type', 'in', '("transfer_in","transfer_out")')
+      .order('date', { ascending: true })
+
+    if (dateFrom) query = query.gte('date', dateFrom)
+    if (dateTo) query = query.lte('date', dateTo)
+    if (containerId) query = query.eq('container_id', containerId)
+
+    const { data: transactions, error } = await query
+    if (error) throw error
+
+    // Fetch container and counterparty names for display
+    const { data: allContainers } = await sb.from('containers').select('id, name')
+    const { data: allCounterparties } = await sb.from('counterparties').select('id, name')
+    const containerMap = new Map((allContainers || []).map((c: { id: string; name: string }) => [c.id, c.name]))
+    const counterpartyMap = new Map((allCounterparties || []).map((c: { id: string; name: string }) => [c.id, c.name]))
+
+    // --- Pattern detection algorithm ---
+    const txs = transactions || []
+
+    // Step 1: Group by similarity key
+    type TxRecord = typeof txs[number]
+    const groups = new Map<string, TxRecord[]>()
+
+    for (const tx of txs) {
+      // Grouping priority: counterparty > normalized description
+      let key: string
+      if (tx.counterparty_id) {
+        key = `cp:${tx.counterparty_id}:${tx.container_id}:${parseFloat(tx.amount as string) >= 0 ? 'in' : 'out'}`
+      } else {
+        // Normalize description: lowercase, remove numbers/dates, trim
+        const desc = ((tx.description as string) || '')
+          .toLowerCase()
+          .replace(/\d{2}[/\-.]\d{2}[/\-.]\d{2,4}/g, '') // remove dates
+          .replace(/\d+[,.]?\d*/g, '')                      // remove numbers
+          .replace(/\s+/g, ' ')
+          .trim()
+        key = `desc:${desc}:${tx.container_id}:${parseFloat(tx.amount as string) >= 0 ? 'in' : 'out'}`
+      }
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key)!.push(tx)
+    }
+
+    // Step 2: Analyze each group
+    interface DetectedPattern {
+      description: string
+      counterpartyId: string | null
+      counterpartyName: string | null
+      containerId: string
+      containerName: string | null
+      type: string
+      frequency: string
+      dayOfMonth: number | null
+      dayOfWeek: number | null
+      avgAmount: number
+      medianAmount: number
+      amountVariance: number
+      amountIsEstimate: boolean
+      confidence: number
+      occurrences: number
+      transactionIds: string[]
+      lastDate: string
+    }
+
+    const patterns: DetectedPattern[] = []
+
+    for (const [, groupTxs] of groups) {
+      if (groupTxs.length < minOccurrences) continue
+
+      // Calculate timespan
+      const dates = groupTxs.map(t => new Date(t.date as string).getTime()).sort((a, b) => a - b)
+      const timespanDays = (dates[dates.length - 1] - dates[0]) / (1000 * 60 * 60 * 24)
+      if (timespanDays < 20) continue // Too short to detect patterns
+
+      // Calculate intervals between consecutive transactions
+      const intervals: number[] = []
+      for (let i = 1; i < dates.length; i++) {
+        intervals.push((dates[i] - dates[i - 1]) / (1000 * 60 * 60 * 24))
+      }
+
+      if (intervals.length === 0) continue
+
+      const medianInterval = intervals.slice().sort((a, b) => a - b)[Math.floor(intervals.length / 2)]
+      const meanInterval = intervals.reduce((s, v) => s + v, 0) / intervals.length
+      const intervalStddev = Math.sqrt(intervals.reduce((s, v) => s + (v - meanInterval) ** 2, 0) / intervals.length)
+      const intervalCV = meanInterval > 0 ? intervalStddev / meanInterval : 999
+
+      // Classify frequency
+      let frequency: string | null = null
+      if (intervalCV < 0.35) {
+        if (medianInterval >= 5 && medianInterval <= 9) frequency = 'weekly'
+        else if (medianInterval >= 12 && medianInterval <= 16) frequency = 'biweekly'
+        else if (medianInterval >= 25 && medianInterval <= 35) frequency = 'monthly'
+        else if (medianInterval >= 55 && medianInterval <= 65) frequency = 'bimonthly'
+        else if (medianInterval >= 80 && medianInterval <= 100) frequency = 'quarterly'
+        else if (medianInterval >= 170 && medianInterval <= 195) frequency = 'semi_annual'
+        else if (medianInterval >= 350 && medianInterval <= 380) frequency = 'annual'
+      }
+
+      if (!frequency) continue // Can't determine frequency
+
+      // Analyze amounts
+      const amounts = groupTxs.map(t => Math.abs(parseFloat(t.amount as string)))
+      const sortedAmounts = amounts.slice().sort((a, b) => a - b)
+      const avgAmount = amounts.reduce((s, v) => s + v, 0) / amounts.length
+      const medianAmount = sortedAmounts[Math.floor(sortedAmounts.length / 2)]
+      const amountStddev = Math.sqrt(amounts.reduce((s, v) => s + (v - avgAmount) ** 2, 0) / amounts.length)
+      const amountCV = avgAmount > 0 ? amountStddev / avgAmount : 0
+      const amountIsEstimate = amountCV > 0.05
+
+      // Determine day of month/week
+      let dayOfMonth: number | null = null
+      let dayOfWeek: number | null = null
+
+      if (['monthly', 'bimonthly', 'quarterly', 'semi_annual', 'annual'].includes(frequency)) {
+        const days = groupTxs.map(t => new Date(t.date as string).getDate())
+        const dayCounts = new Map<number, number>()
+        days.forEach(d => dayCounts.set(d, (dayCounts.get(d) || 0) + 1))
+        dayOfMonth = [...dayCounts.entries()].sort((a, b) => b[1] - a[1])[0][0]
+      }
+      if (['weekly', 'biweekly'].includes(frequency)) {
+        const wdays = groupTxs.map(t => new Date(t.date as string).getDay())
+        const wdayCounts = new Map<number, number>()
+        wdays.forEach(d => wdayCounts.set(d, (wdayCounts.get(d) || 0) + 1))
+        dayOfWeek = [...wdayCounts.entries()].sort((a, b) => b[1] - a[1])[0][0]
+      }
+
+      // Calculate confidence score
+      let confidence = 0
+      if (groupTxs.length >= 6) confidence += 30
+      else if (groupTxs.length >= 4) confidence += 20
+      else confidence += 10
+
+      if (intervalCV < 0.1) confidence += 30
+      else if (intervalCV < 0.2) confidence += 20
+      else if (intervalCV < 0.3) confidence += 10
+
+      if (amountCV < 0.01) confidence += 20
+      else if (amountCV < 0.05) confidence += 15
+      else if (amountCV < 0.15) confidence += 5
+
+      if (groupTxs[0].counterparty_id) confidence += 10
+
+      // Check recency (last occurrence within 45 days)
+      const lastDate = new Date(dates[dates.length - 1])
+      const daysSinceLast = (Date.now() - lastDate.getTime()) / (1000 * 60 * 60 * 24)
+      if (daysSinceLast <= 45) confidence += 10
+
+      const firstTx = groupTxs[0]
+      const isIncome = parseFloat(firstTx.amount as string) >= 0
+
+      patterns.push({
+        description: (groupTxs
+          .map(t => (t.description as string) || '')
+          .sort((a, b) => a.length - b.length)[Math.floor(groupTxs.length / 2)]) || 'Senza descrizione',
+        counterpartyId: (firstTx.counterparty_id as string) || null,
+        counterpartyName: firstTx.counterparty_id ? (counterpartyMap.get(firstTx.counterparty_id as string) || null) : null,
+        containerId: firstTx.container_id as string,
+        containerName: containerMap.get(firstTx.container_id as string) || null,
+        type: isIncome ? 'income' : 'expense',
+        frequency,
+        dayOfMonth,
+        dayOfWeek,
+        avgAmount: isIncome ? avgAmount : -avgAmount,
+        medianAmount: isIncome ? medianAmount : -medianAmount,
+        amountVariance: Math.round(amountCV * 100),
+        amountIsEstimate,
+        confidence: Math.min(confidence, 100),
+        occurrences: groupTxs.length,
+        transactionIds: groupTxs.map(t => t.id as string),
+        lastDate: lastDate.toISOString().slice(0, 10),
+      })
+    }
+
+    // Sort by confidence descending
+    patterns.sort((a, b) => b.confidence - a.confidence)
+
+    return ok(res, { patterns })
+  }
+
+  // POST /recurrences { _action: 'create-batch' } — create multiple recurrences from detection
+  if (method === 'POST' && bodyActionRec === 'create-batch') {
+    const b = req.body || {}
+    const recurrences = b.recurrences as Array<Record<string, unknown>>
+    if (!Array.isArray(recurrences) || recurrences.length === 0) {
+      return badRequest(res, 'recurrences[] è obbligatorio')
+    }
+
+    const insertedIds: string[] = []
+    const errors: string[] = []
+
+    for (const rec of recurrences) {
+      const { data, error } = await sb
+        .from('recurrences')
+        .insert({
+          description: rec.description,
+          frequency: rec.frequency,
+          day_of_month: rec.dayOfMonth ?? null,
+          day_of_week: rec.dayOfWeek ?? null,
+          business_days_only: false,
+          amount: rec.amount ?? null,
+          amount_is_estimate: rec.amountIsEstimate ?? false,
+          currency: rec.currency ?? 'EUR',
+          container_id: rec.containerId ?? null,
+          counterparty_id: rec.counterpartyId ?? null,
+          type: rec.type,
+          start_date: rec.startDate ?? new Date().toISOString().slice(0, 10),
+          is_active: true,
+        })
+        .select('id')
+        .single()
+
+      if (error) {
+        errors.push(`${rec.description}: ${error.message}`)
+      } else if (data) {
+        insertedIds.push(data.id)
+
+        // Link historical transactions to this recurrence
+        const txIds = rec.transactionIds as string[] | undefined
+        if (txIds && txIds.length > 0) {
+          await sb
+            .from('transactions')
+            .update({ recurrence_id: data.id })
+            .in('id', txIds)
+        }
+      }
+    }
+
+    return created(res, { created: insertedIds.length, ids: insertedIds, errors: errors.length > 0 ? errors : undefined })
+  }
 
   if (method === 'GET' && !id) {
     const { data, error } = await sb

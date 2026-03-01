@@ -130,7 +130,7 @@ export const transactionsApi = {
   create: (data: Partial<Transaction> & { tagIds?: string[] }) =>
     api.post<Transaction>('/transactions', data),
   batchCreate: (transactions: Partial<Transaction>[]) =>
-    api.post<{ inserted: number; failed: number; total: number; errors?: string[] }>(
+    api.post<{ inserted: number; failed: number; skippedDuplicates: number; total: number; errors?: string[] }>(
       '/transactions?action=batch',
       { transactions },
     ),
@@ -149,9 +149,53 @@ export const transactionsApi = {
       '/transactions',
       { ...data, _action: 'update-transfer', id },
     ),
+  /** Check which external_hashes already exist in DB for a container (dedup) */
+  checkHashes: (containerId: string, hashes: string[]) =>
+    api.post<{ existingHashes: string[] }>(
+      '/transactions?action=check-hashes',
+      { containerId, hashes },
+    ),
+  /** Find manual transactions that could match imported ones (reconciliation) */
+  findMatches: (containerId: string, candidates: Array<{ date: string; amount: number; description: string }>) =>
+    api.post<{ manualTransactions: Array<Record<string, unknown>> }>(
+      '/transactions?action=find-matches',
+      { containerId, candidates },
+    ),
+  /** Reconcile: keep one transaction, remove the other, copy dedup fields */
+  reconcile: (keepId: string, removeId: string) =>
+    api.post<{ reconciled: boolean }>(
+      '/transactions?action=reconcile',
+      { keepId, removeId },
+    ),
+  /** Reconcile multiple pairs at once */
+  reconcileBulk: (pairs: Array<{ keepId: string; removeId: string }>) =>
+    api.post<{ reconciled: number; errors?: string[] }>(
+      '/transactions?action=reconcile-bulk',
+      { pairs },
+    ),
 }
 
 // -- Recurrences --
+export interface DetectedPattern {
+  description: string
+  counterpartyId: string | null
+  counterpartyName: string | null
+  containerId: string
+  containerName: string | null
+  type: string
+  frequency: string
+  dayOfMonth: number | null
+  dayOfWeek: number | null
+  avgAmount: number
+  medianAmount: number
+  amountVariance: number
+  amountIsEstimate: boolean
+  confidence: number
+  occurrences: number
+  transactionIds: string[]
+  lastDate: string
+}
+
 export const recurrencesApi = {
   list: () => api.get<Recurrence[]>('/recurrences'),
   get: (id: string) => api.get<Recurrence>(`/recurrences/${id}`),
@@ -159,6 +203,12 @@ export const recurrencesApi = {
   update: (id: string, data: Partial<Recurrence>) =>
     api.post<Recurrence>('/recurrences', { ...data, _action: 'update', id }),
   delete: (id: string) => api.post<{ deleted: boolean }>('/recurrences', { _action: 'delete', id }),
+  /** Auto-detect recurring patterns from transaction history */
+  detect: (params?: { dateFrom?: string; dateTo?: string; containerId?: string; minOccurrences?: number }) =>
+    api.post<{ patterns: DetectedPattern[] }>('/recurrences', { _action: 'detect', ...params }),
+  /** Batch create recurrences from detected patterns and link historical transactions */
+  createBatch: (recurrences: Array<Record<string, unknown>>) =>
+    api.post<{ created: number; ids: string[]; errors?: string[] }>('/recurrences', { _action: 'create-batch', recurrences }),
 }
 
 // -- Budget --

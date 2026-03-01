@@ -12,6 +12,8 @@ import {
   Check,
   X,
   Loader2,
+  Link2,
+  ShieldCheck,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import {
@@ -64,8 +66,68 @@ interface ColumnMapping {
 interface ImportResultData {
   imported: number
   duplicates: number
+  skippedDuplicates: number
   errors: number
   errorMessages?: string[]
+  reconciled?: number
+}
+
+interface MatchCandidate {
+  csvRowIndex: number
+  csvDescription: string
+  csvAmount: number
+  csvDate: string
+  manualTxId: string
+  manualDescription: string
+  manualAmount: number
+  manualDate: string
+  score: number
+  reasons: string[]
+}
+
+// ============================================================
+// RECONCILIATION SCORING
+// ============================================================
+
+function scoreMatch(
+  csvRow: ParsedRow,
+  manualTx: Record<string, unknown>,
+): { score: number; reasons: string[] } {
+  let score = 0
+  const reasons: string[] = []
+  const csvAmount = csvRow.mapped.amount
+  const manualAmount = parseFloat(manualTx.amount as string)
+
+  // Amount match
+  if (Math.abs(csvAmount - manualAmount) < 0.01) {
+    score += 40; reasons.push('Importo identico')
+  } else if (Math.abs(manualAmount) > 0 && Math.abs(1 - csvAmount / manualAmount) < 0.02) {
+    score += 25; reasons.push('Importo simile (±2%)')
+  }
+
+  // Date match
+  const csvDate = new Date(csvRow.mapped.date)
+  const manualDate = new Date(manualTx.date as string)
+  const daysDiff = Math.abs((csvDate.getTime() - manualDate.getTime()) / (1000 * 60 * 60 * 24))
+  if (daysDiff === 0) { score += 30; reasons.push('Stessa data') }
+  else if (daysDiff <= 1) { score += 20; reasons.push('±1 giorno') }
+  else if (daysDiff <= 3) { score += 10; reasons.push('±3 giorni') }
+
+  // Same type direction
+  const csvIsExpense = csvAmount < 0
+  const manualIsExpense = manualAmount < 0
+  if (csvIsExpense === manualIsExpense) {
+    score += 10; reasons.push('Stessa direzione')
+  }
+
+  // Description similarity (basic word overlap)
+  const csvWords = new Set(csvRow.mapped.description.toLowerCase().split(/\s+/).filter(w => w.length > 2))
+  const manualWords = new Set(((manualTx.description as string) || '').toLowerCase().split(/\s+/).filter(w => w.length > 2))
+  const overlap = [...csvWords].filter(w => manualWords.has(w)).length
+  if (overlap >= 2) { score += 15; reasons.push('Descrizione simile') }
+  else if (overlap >= 1) { score += 5; reasons.push('Parola in comune') }
+
+  return { score: Math.min(score, 100), reasons }
 }
 
 // ============================================================
@@ -439,13 +501,91 @@ export function ImportData() {
     }
   }, [profileSelection, customProfile, columnMapping])
 
-  /** Step 2 -> 3: process import */
+  // --- Match candidates for reconciliation ---
+  const [matchCandidates, setMatchCandidates] = useState<MatchCandidate[]>([])
+  const [selectedMatches, setSelectedMatches] = useState<Set<number>>(new Set())
+  const [showReconciliation, setShowReconciliation] = useState(false)
+
+  /** Step 2 -> 3: process import with dedup check against DB */
   const goToStep3 = useCallback(async () => {
-    if (!file) return
+    if (!file || !containerId) return
     setIsProcessing(true)
     try {
       const profile = buildEffectiveProfile()
-      const result = await processCSVImport(file, profile)
+
+      // Step A: Parse CSV first (without dedup) to get all hashes
+      const rawResult = await processCSVImport(file, profile)
+
+      // Step B: Collect unique hashes from parsed rows
+      const allHashes = [...new Set(rawResult.parsedRows.map(r => r.hash).filter(Boolean))]
+
+      // Step C: Check which hashes already exist in DB
+      let existingHashSet = new Set<string>()
+      if (allHashes.length > 0) {
+        try {
+          const { existingHashes } = await transactionsApi.checkHashes(containerId, allHashes)
+          existingHashSet = new Set(existingHashes)
+        } catch (err) {
+          console.warn('Hash check failed, proceeding without DB dedup:', err)
+        }
+      }
+
+      // Step D: Re-process with existing hashes for accurate dedup
+      const result = await processCSVImport(file, profile, existingHashSet)
+
+      // Step E: Find reconciliation candidates (manual transactions matching imports)
+      const readyRows = result.parsedRows.filter(r => r.status === 'ready')
+      let matches: MatchCandidate[] = []
+      if (readyRows.length > 0) {
+        try {
+          const candidates = readyRows.map(r => ({
+            date: r.mapped.date,
+            amount: r.mapped.amount,
+            description: r.mapped.description,
+          }))
+          const { manualTransactions } = await transactionsApi.findMatches(containerId, candidates)
+
+          // Client-side matching algorithm
+          for (const row of readyRows) {
+            for (const manual of manualTransactions) {
+              const score = scoreMatch(row, manual as Record<string, unknown>)
+              if (score.score >= 60) {
+                matches.push({
+                  csvRowIndex: row.rowIndex,
+                  csvDescription: row.mapped.description,
+                  csvAmount: row.mapped.amount,
+                  csvDate: row.mapped.date,
+                  manualTxId: manual.id as string,
+                  manualDescription: (manual.description as string) || '',
+                  manualAmount: parseFloat(manual.amount as string),
+                  manualDate: manual.date as string,
+                  score: score.score,
+                  reasons: score.reasons,
+                })
+              }
+            }
+          }
+
+          // Keep only the best match per CSV row and per manual transaction
+          const bestByRow = new Map<number, MatchCandidate>()
+          const bestByManual = new Map<string, MatchCandidate>()
+          matches.sort((a, b) => b.score - a.score)
+          for (const m of matches) {
+            if (!bestByRow.has(m.csvRowIndex) && !bestByManual.has(m.manualTxId)) {
+              bestByRow.set(m.csvRowIndex, m)
+              bestByManual.set(m.manualTxId, m)
+            }
+          }
+          matches = [...bestByRow.values()]
+        } catch (err) {
+          console.warn('Reconciliation matching failed:', err)
+        }
+      }
+
+      setMatchCandidates(matches)
+      // Auto-select high-confidence matches
+      setSelectedMatches(new Set(matches.filter(m => m.score >= 85).map(m => m.csvRowIndex)))
+      setShowReconciliation(matches.length > 0)
       setPreview(result)
       setStep(3)
     } catch (err) {
@@ -453,34 +593,73 @@ export function ImportData() {
     } finally {
       setIsProcessing(false)
     }
-  }, [file, buildEffectiveProfile])
+  }, [file, containerId, buildEffectiveProfile])
 
   // --- Import in progress flag ---
   const [isImporting, setIsImporting] = useState(false)
   const queryClient = useQueryClient()
 
-  /** Step 3 -> 4: perform import */
+  /** Step 3 -> 4: perform import with reconciliation */
   const performImport = useCallback(async () => {
     if (!preview || isImporting) return
 
-    const readyRows = preview.parsedRows.filter(r => r.status === 'ready')
-    const transactions = convertToTransactions(readyRows, containerId, 'csv_import')
+    // Filter out rows that will be reconciled (matched to existing manual transactions)
+    const reconciledRowIndices = new Set(
+      matchCandidates
+        .filter(m => selectedMatches.has(m.csvRowIndex))
+        .map(m => m.csvRowIndex)
+    )
 
-    if (transactions.length === 0) return
+    const readyRows = preview.parsedRows.filter(
+      r => r.status === 'ready' && !reconciledRowIndices.has(r.rowIndex)
+    )
+    const transactions = convertToTransactions(readyRows, containerId, 'csv_import')
 
     setIsImporting(true)
     try {
-      const result = await transactionsApi.batchCreate(transactions)
+      // Step A: Reconcile matched transactions (keep manual, copy dedup fields from CSV)
+      let reconciledCount = 0
+      if (selectedMatches.size > 0) {
+        const pairs = matchCandidates
+          .filter(m => selectedMatches.has(m.csvRowIndex))
+          .map(m => {
+            // We need to create a temporary import of the CSV row to get its external_hash,
+            // then reconcile. Instead, we update the manual tx with the hash directly.
+            const csvRow = preview.parsedRows.find(r => r.rowIndex === m.csvRowIndex)
+            return { keepId: m.manualTxId, hash: csvRow?.hash || '' }
+          })
 
-      // Invalidate caches so transaction list and stats refresh
+        // For each reconciliation, update the manual transaction with the CSV hash
+        for (const pair of pairs) {
+          if (!pair.hash) continue
+          try {
+            await transactionsApi.update(pair.keepId, {
+              externalHash: pair.hash,
+            } as never)
+            reconciledCount++
+          } catch {
+            // Silently continue if one fails
+          }
+        }
+      }
+
+      // Step B: Import remaining (non-reconciled) transactions
+      let importResult = { inserted: 0, failed: 0, skippedDuplicates: 0, total: 0, errors: undefined as string[] | undefined }
+      if (transactions.length > 0) {
+        importResult = await transactionsApi.batchCreate(transactions)
+      }
+
+      // Invalidate caches
       queryClient.invalidateQueries({ queryKey: ['transactions'] })
       queryClient.invalidateQueries({ queryKey: ['stats'] })
 
       setImportResult({
-        imported: result.inserted,
+        imported: importResult.inserted,
         duplicates: preview.duplicateCount,
-        errors: result.failed + preview.errorCount,
-        errorMessages: result.errors,
+        skippedDuplicates: importResult.skippedDuplicates,
+        errors: importResult.failed + preview.errorCount,
+        errorMessages: importResult.errors,
+        reconciled: reconciledCount,
       })
       setStep(4)
     } catch (err) {
@@ -489,6 +668,7 @@ export function ImportData() {
       setImportResult({
         imported: 0,
         duplicates: preview.duplicateCount,
+        skippedDuplicates: 0,
         errors: preview.readyCount + preview.errorCount,
         errorMessages: [message],
       })
@@ -496,7 +676,7 @@ export function ImportData() {
     } finally {
       setIsImporting(false)
     }
-  }, [preview, containerId, isImporting, queryClient])
+  }, [preview, containerId, isImporting, queryClient, matchCandidates, selectedMatches])
 
   /** Reset wizard */
   const resetWizard = useCallback(() => {
@@ -1018,7 +1198,7 @@ export function ImportData() {
       {step === 3 && preview && (
         <div className="space-y-6">
           {/* Summary cards */}
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
             <SummaryCard
               label="Totale righe"
               value={preview.totalRows}
@@ -1027,15 +1207,21 @@ export function ImportData() {
             />
             <SummaryCard
               label="Pronte"
-              value={preview.readyCount}
+              value={preview.readyCount - matchCandidates.filter(m => selectedMatches.has(m.csvRowIndex)).length}
               color="text-green-400"
               bg="bg-green-500/10"
             />
             <SummaryCard
-              label="Duplicati"
+              label="Gia' importate"
               value={preview.duplicateCount}
               color="text-amber-400"
               bg="bg-amber-500/10"
+            />
+            <SummaryCard
+              label="Riconciliabili"
+              value={matchCandidates.length}
+              color="text-blue-400"
+              bg="bg-blue-500/10"
             />
             <SummaryCard
               label="Errori"
@@ -1044,6 +1230,109 @@ export function ImportData() {
               bg="bg-red-500/10"
             />
           </div>
+
+          {/* Dedup info banner */}
+          {preview.duplicateCount > 0 && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-6 py-4">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="h-5 w-5 text-amber-400" />
+                <p className="text-sm text-zinc-200">
+                  <span className="font-semibold text-amber-400">{preview.duplicateCount} righe duplicate</span>
+                  {' '}rilevate nel database — saranno saltate automaticamente.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Reconciliation section */}
+          {matchCandidates.length > 0 && (
+            <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 overflow-hidden">
+              <button
+                onClick={() => setShowReconciliation(!showReconciliation)}
+                className="flex w-full items-center justify-between px-6 py-4 text-left"
+              >
+                <div className="flex items-center gap-2">
+                  <Link2 className="h-5 w-5 text-blue-400" />
+                  <div>
+                    <p className="text-sm font-semibold text-blue-400">
+                      Riconciliazione: {matchCandidates.length} corrispondenze trovate
+                    </p>
+                    <p className="text-xs text-zinc-400">
+                      Transazioni gia' inserite manualmente che corrispondono a righe del CSV.
+                      {selectedMatches.size > 0 && ` ${selectedMatches.size} selezionate per riconciliazione.`}
+                    </p>
+                  </div>
+                </div>
+                <ChevronRight className={cn('h-4 w-4 text-blue-400 transition-transform', showReconciliation && 'rotate-90')} />
+              </button>
+              {showReconciliation && (
+                <div className="border-t border-blue-500/20 px-6 py-4 space-y-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs text-zinc-500">
+                      Le righe selezionate NON verranno importate: la transazione manuale esistente verra' aggiornata con l'hash dedup.
+                    </p>
+                    <button
+                      onClick={() => {
+                        if (selectedMatches.size === matchCandidates.length) {
+                          setSelectedMatches(new Set())
+                        } else {
+                          setSelectedMatches(new Set(matchCandidates.map(m => m.csvRowIndex)))
+                        }
+                      }}
+                      className="text-xs text-blue-400 hover:text-blue-300 whitespace-nowrap ml-4"
+                    >
+                      {selectedMatches.size === matchCandidates.length ? 'Deseleziona tutti' : 'Seleziona tutti'}
+                    </button>
+                  </div>
+                  {matchCandidates.map((match) => (
+                    <label
+                      key={match.csvRowIndex}
+                      className={cn(
+                        'flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors',
+                        selectedMatches.has(match.csvRowIndex)
+                          ? 'border-blue-500/50 bg-blue-500/5'
+                          : 'border-zinc-700 bg-zinc-800/50 hover:border-zinc-600',
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedMatches.has(match.csvRowIndex)}
+                        onChange={() => {
+                          const next = new Set(selectedMatches)
+                          if (next.has(match.csvRowIndex)) next.delete(match.csvRowIndex)
+                          else next.add(match.csvRowIndex)
+                          setSelectedMatches(next)
+                        }}
+                        className="mt-1 h-4 w-4 rounded border-zinc-600 bg-zinc-800 text-blue-500 focus:ring-blue-500"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge variant={match.score >= 85 ? 'success' : match.score >= 70 ? 'warning' : 'info'} size="sm">
+                            {match.score}%
+                          </Badge>
+                          {match.reasons.map((r, i) => (
+                            <span key={i} className="text-[10px] text-zinc-500">{r}</span>
+                          ))}
+                        </div>
+                        <div className="mt-1 grid grid-cols-2 gap-4 text-xs">
+                          <div>
+                            <p className="text-zinc-500 mb-0.5">CSV (importata)</p>
+                            <p className="text-zinc-300 truncate">{match.csvDescription}</p>
+                            <p className="text-zinc-400">{formatDate(match.csvDate)} &middot; {formatCurrency(match.csvAmount)}</p>
+                          </div>
+                          <div>
+                            <p className="text-zinc-500 mb-0.5">Manuale (esistente)</p>
+                            <p className="text-zinc-300 truncate">{match.manualDescription}</p>
+                            <p className="text-zinc-400">{formatDate(match.manualDate)} &middot; {formatCurrency(match.manualAmount)}</p>
+                          </div>
+                        </div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Preview table */}
           <div className="rounded-xl border border-zinc-800 bg-zinc-900 overflow-hidden">
@@ -1067,9 +1356,10 @@ export function ImportData() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-800/50">
-                  {preview.parsedRows.map((row) => (
-                    <PreviewRow key={row.rowIndex} row={row} />
-                  ))}
+                  {preview.parsedRows.map((row) => {
+                    const isReconciled = matchCandidates.some(m => m.csvRowIndex === row.rowIndex && selectedMatches.has(m.csvRowIndex))
+                    return <PreviewRow key={row.rowIndex} row={row} isReconciled={isReconciled} />
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1085,11 +1375,11 @@ export function ImportData() {
               Indietro
             </button>
             <button
-              disabled={preview.readyCount === 0 || isImporting}
+              disabled={(preview.readyCount === 0 && selectedMatches.size === 0) || isImporting}
               onClick={performImport}
               className={cn(
                 'flex items-center gap-2 rounded-lg px-6 py-2.5 text-sm font-medium transition-colors',
-                preview.readyCount > 0 && !isImporting
+                (preview.readyCount > 0 || selectedMatches.size > 0) && !isImporting
                   ? 'bg-energy-500 text-zinc-950 hover:bg-energy-400'
                   : 'cursor-not-allowed bg-zinc-800 text-zinc-600',
               )}
@@ -1101,7 +1391,8 @@ export function ImportData() {
                 </>
               ) : (
                 <>
-                  Importa {preview.readyCount} transazioni
+                  Importa {preview.readyCount - selectedMatches.size} transazioni
+                  {selectedMatches.size > 0 && ` + riconcilia ${selectedMatches.size}`}
                   <ArrowRight className="h-4 w-4" />
                 </>
               )}
@@ -1113,7 +1404,7 @@ export function ImportData() {
       {/* ============================== STEP 4 ============================== */}
       {step === 4 && importResult && (
         <div className="flex flex-col items-center justify-center rounded-xl border border-zinc-800 bg-zinc-900 px-6 py-16">
-          {importResult.imported > 0 ? (
+          {(importResult.imported > 0 || (importResult.reconciled ?? 0) > 0) ? (
             <>
               <div className="flex h-16 w-16 items-center justify-center rounded-full bg-energy-500/15">
                 <CheckCircle2 className="h-8 w-8 text-energy-400" />
@@ -1136,13 +1427,21 @@ export function ImportData() {
           )}
 
           {/* Result summary */}
-          <div className="mt-8 flex gap-6">
+          <div className="mt-8 flex flex-wrap justify-center gap-6">
             <div className="text-center">
               <p className="text-2xl font-bold text-green-400">{importResult.imported}</p>
               <p className="text-xs text-zinc-500">Importate</p>
             </div>
+            {(importResult.reconciled ?? 0) > 0 && (
+              <div className="text-center">
+                <p className="text-2xl font-bold text-blue-400">{importResult.reconciled}</p>
+                <p className="text-xs text-zinc-500">Riconciliate</p>
+              </div>
+            )}
             <div className="text-center">
-              <p className="text-2xl font-bold text-amber-400">{importResult.duplicates}</p>
+              <p className="text-2xl font-bold text-amber-400">
+                {importResult.duplicates + importResult.skippedDuplicates}
+              </p>
               <p className="text-xs text-zinc-500">Duplicati saltati</p>
             </div>
             <div className="text-center">
@@ -1150,6 +1449,20 @@ export function ImportData() {
               <p className="text-xs text-zinc-500">Errori</p>
             </div>
           </div>
+
+          {/* Reconciliation info */}
+          {(importResult.reconciled ?? 0) > 0 && (
+            <div className="mt-6 w-full max-w-lg rounded-lg border border-blue-500/30 bg-blue-500/5 p-4">
+              <div className="flex items-center gap-2">
+                <Link2 className="h-4 w-4 text-blue-400" />
+                <p className="text-sm text-zinc-200">
+                  <span className="font-medium text-blue-400">{importResult.reconciled} transazioni riconciliate</span>
+                  {' '}— le transazioni manuali esistenti sono state aggiornate con l'hash dedup.
+                  I futuri import non creeranno duplicati.
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Error details */}
           {importResult.errorMessages && importResult.errorMessages.length > 0 && (
@@ -1208,9 +1521,10 @@ function SummaryCard({
   )
 }
 
-function PreviewRow({ row }: { row: ParsedRow }) {
-  const rowBg =
-    row.status === 'ready'
+function PreviewRow({ row, isReconciled }: { row: ParsedRow; isReconciled?: boolean }) {
+  const rowBg = isReconciled
+    ? 'bg-blue-500/[0.03]'
+    : row.status === 'ready'
       ? 'bg-green-500/[0.03]'
       : row.status === 'duplicate'
         ? 'bg-amber-500/[0.03]'
@@ -1218,8 +1532,12 @@ function PreviewRow({ row }: { row: ParsedRow }) {
           ? 'bg-red-500/[0.03]'
           : ''
 
-  const statusBadge =
-    row.status === 'ready' ? (
+  const statusBadge = isReconciled ? (
+    <Badge variant="info" size="sm">
+      <Link2 className="mr-1 h-3 w-3" />
+      MATCH
+    </Badge>
+  ) : row.status === 'ready' ? (
       <Badge variant="success" size="sm">
         <CheckCircle2 className="mr-1 h-3 w-3" />
         OK
