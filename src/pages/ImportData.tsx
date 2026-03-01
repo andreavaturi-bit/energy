@@ -644,7 +644,7 @@ export function ImportData() {
       }
 
       // Step B: Import remaining (non-reconciled) transactions
-      let importResult = { inserted: 0, failed: 0, skippedDuplicates: 0, total: 0, errors: undefined as string[] | undefined }
+      let importResult: { inserted: number; failed: number; skippedDuplicates: number; total: number; errors?: string[] } = { inserted: 0, failed: 0, skippedDuplicates: 0, total: 0 }
       if (transactions.length > 0) {
         importResult = await transactionsApi.batchCreate(transactions)
       }

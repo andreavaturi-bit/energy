@@ -279,8 +279,8 @@ export function Recurrences() {
               const container = containers.find((c) => c.id === rec.containerId)
               const counterparty = rec.counterpartyId ? counterparties.find((cp) => cp.id === rec.counterpartyId) : null
               const amount = rec.amount ? parseFloat(rec.amount) : 0
-              const containerName = (rec as Record<string, unknown>).containerName as string || container?.name || 'N/A'
-              const counterpartyName = (rec as Record<string, unknown>).counterpartyName as string || counterparty?.name || null
+              const containerName = (rec as unknown as Record<string, unknown>).containerName as string || container?.name || 'N/A'
+              const counterpartyName = (rec as unknown as Record<string, unknown>).counterpartyName as string || counterparty?.name || null
               const daysUntil = getDaysUntilNext(rec)
 
               return (
