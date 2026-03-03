@@ -5,6 +5,7 @@ import type {
   Tag,
   Transaction,
   Recurrence,
+  SmartRule,
 } from '@/types'
 
 // ── Base URL: /api served by Vercel serverless functions ──
@@ -243,7 +244,80 @@ export const budgetApi = {
     api.post<{ deleted: boolean }>('/budget', { _action: 'delete-allocation', id }),
 }
 
+// -- Smart Rules --
+export interface AutoTagResult {
+  applied: number
+  matches: Array<{ transactionId: string; ruleId: string; ruleName: string; tagId: string; description: string }>
+  dryRun: boolean
+  totalUntagged: number
+  totalRules: number
+}
+
+export interface RuleSuggestion {
+  tagId: string
+  tagName: string
+  tagColor: string
+  type: 'counterparty' | 'keyword' | 'amount_range'
+  pattern: string
+  confidence: number
+  exampleCount: number
+  ruleName: string
+}
+
+export const smartRulesApi = {
+  list: () => api.get<SmartRule[]>('/smart-rules'),
+  create: (data: Partial<SmartRule>) => api.post<SmartRule>('/smart-rules', data),
+  update: (id: string, data: Partial<SmartRule>) =>
+    api.post<{ updated: boolean }>('/smart-rules', { ...data, _action: 'update', id }),
+  delete: (id: string) => api.post<{ deleted: boolean }>('/smart-rules', { _action: 'delete', id }),
+  autoTag: (dryRun = false, limit = 500) =>
+    api.post<AutoTagResult>('/smart-rules', { _action: 'auto-tag', dryRun, limit }),
+  suggestRules: () =>
+    api.post<{ suggestions: RuleSuggestion[] }>('/smart-rules', { _action: 'suggest-rules' }),
+}
+
 // -- Stats (Dashboard) --
+export interface TagBreakdownItem {
+  tagId: string | null
+  tagName: string
+  tagColor: string
+  total: number
+  count: number
+  percentage: number
+}
+
+export interface MonthlyTrendItem {
+  month: string
+  income: number
+  expenses: number
+  net: number
+}
+
+export interface BurningRateStats {
+  dailyExpense: number
+  dailyIncome: number
+  savingsRate: number
+  autonomyDays: number
+  totalBalance: number
+  periodDays: number
+}
+
 export const statsApi = {
   getDashboard: () => api.get<Record<string, unknown>>('/stats'),
+  getByTag: (params?: { dateFrom?: string; dateTo?: string; containerId?: string; tagType?: string; direction?: string }) => {
+    const qs = params ? '?' + new URLSearchParams(Object.entries(params).filter(([, v]) => v) as string[][]).toString() : ''
+    return api.get<{ breakdown: TagBreakdownItem[]; grandTotal: number; transactionCount: number }>(`/stats/by-tag${qs}`)
+  },
+  getMonthlyTrend: (params?: { months?: number; containerId?: string }) => {
+    const qs = params ? '?' + new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)]),
+    ).toString() : ''
+    return api.get<{ trend: MonthlyTrendItem[] }>(`/stats/monthly-trend${qs}`)
+  },
+  getBurningRate: (params?: { days?: number }) => {
+    const qs = params ? '?' + new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)]),
+    ).toString() : ''
+    return api.get<BurningRateStats>(`/stats/burning-rate${qs}`)
+  },
 }

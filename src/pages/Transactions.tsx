@@ -24,12 +24,13 @@ import {
   Loader2,
   AlertCircle,
 } from 'lucide-react'
-import type { Transaction, TransactionType, TransactionStatus, Container, Counterparty, Subject } from '@/types'
+import type { Transaction, TransactionType, TransactionStatus, Container, Counterparty, Subject, Tag } from '@/types'
 import {
   useTransactions,
   useContainers,
   useCounterparties,
   useSubjects,
+  useTags,
   useCreateTransaction,
   useUpdateTransaction,
   useDeleteTransaction,
@@ -119,6 +120,7 @@ function TransactionModal({
   containers,
   counterparties,
   subjects,
+  tags,
   isSaving,
   saveError,
 }: {
@@ -129,6 +131,7 @@ function TransactionModal({
   containers: Container[]
   counterparties: Counterparty[]
   subjects: Subject[]
+  tags: Tag[]
   isSaving?: boolean
   saveError?: string | null
 }) {
@@ -162,9 +165,19 @@ function TransactionModal({
     notes: existing?.notes ?? '',
     sharedWithSubjectId: existing?.sharedWithSubjectId ?? '',
     sharePercentage: existing?.sharePercentage ?? '',
+    tagIds: (existing?.tags || []).map(t => t.id),
   })
 
   const isTransfer = form.type === 'transfer'
+
+  function toggleTag(tagId: string) {
+    setForm(prev => ({
+      ...prev,
+      tagIds: prev.tagIds.includes(tagId)
+        ? prev.tagIds.filter(id => id !== tagId)
+        : [...prev.tagIds, tagId],
+    }))
+  }
 
   function handleSave() {
     if (!form.amount) return
@@ -206,6 +219,7 @@ function TransactionModal({
         notes: form.notes || null,
         sharedWithSubjectId: form.sharedWithSubjectId || null,
         sharePercentage: form.sharePercentage || null,
+        tagIds: form.tagIds.length > 0 ? form.tagIds : undefined,
       })
     }
   }
@@ -344,6 +358,36 @@ function TransactionModal({
             </div>
           )}
 
+          {/* Tags */}
+          {tags.length > 0 && (
+            <div>
+              <label className={labelCls}>Tag</label>
+              <div className="flex flex-wrap gap-1.5">
+                {tags.filter(t => t.isActive).map(tag => {
+                  const selected = form.tagIds.includes(tag.id)
+                  return (
+                    <button
+                      key={tag.id}
+                      type="button"
+                      onClick={() => toggleTag(tag.id)}
+                      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-all ${
+                        selected
+                          ? 'ring-2 ring-energy-500 bg-zinc-700 text-zinc-100'
+                          : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300'
+                      }`}
+                    >
+                      <span
+                        className="h-2 w-2 rounded-full shrink-0"
+                        style={{ backgroundColor: tag.color || '#6b7280' }}
+                      />
+                      {tag.name}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Notes */}
           <div>
             <label className={labelCls}>Note</label>
@@ -390,6 +434,7 @@ export function Transactions() {
   const [containerId, setContainerId] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [tagFilter, setTagFilter] = useState('')
 
   // Table state
   const [sorting, setSorting] = useState<SortingState>([
@@ -400,15 +445,15 @@ export function Transactions() {
   // Debounce ALL filter values (300ms) so that date pickers, search input,
   // and dropdowns never trigger an API call while the user is still interacting.
   const [debouncedFilters, setDebouncedFilters] = useState({
-    searchText, dateFrom, dateTo, containerId, typeFilter, statusFilter,
+    searchText, dateFrom, dateTo, containerId, typeFilter, statusFilter, tagFilter,
   })
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => {
     debounceRef.current = setTimeout(() => {
-      setDebouncedFilters({ searchText, dateFrom, dateTo, containerId, typeFilter, statusFilter })
+      setDebouncedFilters({ searchText, dateFrom, dateTo, containerId, typeFilter, statusFilter, tagFilter })
     }, 300)
     return () => clearTimeout(debounceRef.current)
-  }, [searchText, dateFrom, dateTo, containerId, typeFilter, statusFilter])
+  }, [searchText, dateFrom, dateTo, containerId, typeFilter, statusFilter, tagFilter])
 
   // ── Build API query params from debounced filter state ─────
   const queryParams = useMemo(() => {
@@ -422,6 +467,7 @@ export function Transactions() {
     if (debouncedFilters.containerId) params.containerId = debouncedFilters.containerId
     if (debouncedFilters.typeFilter) params.type = debouncedFilters.typeFilter
     if (debouncedFilters.statusFilter) params.status = debouncedFilters.statusFilter
+    if (debouncedFilters.tagFilter) params.tagId = debouncedFilters.tagFilter
     return params
   }, [debouncedFilters])
 
@@ -430,6 +476,7 @@ export function Transactions() {
   const { data: containers = [], isLoading: containersLoading } = useContainers()
   const { data: counterparties = [], isLoading: counterpartiesLoading } = useCounterparties()
   const { data: subjects = [] } = useSubjects()
+  const { data: tags = [] } = useTags()
 
   // ── Mutation hooks ─────────────────────────────────────────
   const createMutation = useCreateTransaction()
@@ -564,7 +611,8 @@ export function Transactions() {
     dateTo !== '' ||
     containerId !== '' ||
     typeFilter !== '' ||
-    statusFilter !== ''
+    statusFilter !== '' ||
+    tagFilter !== ''
 
   function clearFilters() {
     setSearchText('')
@@ -573,6 +621,7 @@ export function Transactions() {
     setContainerId('')
     setTypeFilter('')
     setStatusFilter('')
+    setTagFilter('')
   }
 
   // ── Column definitions ────────────────────────────────────
@@ -631,6 +680,32 @@ export function Transactions() {
             >
               {transactionTypeLabel(type)}
             </span>
+          )
+        },
+      },
+      {
+        id: 'tags',
+        header: 'Tag',
+        enableSorting: false,
+        cell: ({ row }) => {
+          const txTags = (row.original.tags || []) as Tag[]
+          if (txTags.length === 0) return <span className="text-zinc-600">—</span>
+          return (
+            <div className="flex flex-wrap gap-1">
+              {txTags.slice(0, 3).map(tag => (
+                <span
+                  key={tag.id}
+                  className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium bg-zinc-800 text-zinc-300"
+                  title={tag.name}
+                >
+                  <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ backgroundColor: tag.color || '#6b7280' }} />
+                  {tag.name.length > 12 ? tag.name.slice(0, 12) + '…' : tag.name}
+                </span>
+              ))}
+              {txTags.length > 3 && (
+                <span className="text-[10px] text-zinc-500">+{txTags.length - 3}</span>
+              )}
+            </div>
           )
         },
       },
@@ -852,6 +927,20 @@ export function Transactions() {
             ))}
           </select>
 
+          {/* Tag dropdown */}
+          <select
+            value={tagFilter}
+            onChange={(e) => setTagFilter(e.target.value)}
+            className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-300 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500"
+          >
+            <option value="">Tag</option>
+            {tags.filter(t => t.isActive).map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+
           {/* Clear filters */}
           {hasFilters && (
             <button
@@ -1018,6 +1107,7 @@ export function Transactions() {
           containers={containers}
           counterparties={counterparties}
           subjects={subjects}
+          tags={tags}
           isSaving={createMutation.isPending || transferSaving}
           saveError={createErrorMsg}
         />
@@ -1037,6 +1127,7 @@ export function Transactions() {
           containers={containers}
           counterparties={counterparties}
           subjects={subjects}
+          tags={tags}
           isSaving={updateMutation.isPending || transferSaving}
           saveError={updateErrorMsg}
         />

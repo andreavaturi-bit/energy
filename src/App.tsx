@@ -11,6 +11,7 @@ import { Statistics } from './pages/Statistics'
 import { Projections } from './pages/Projections'
 import { Pendenze } from './pages/Pendenze'
 import { Settings } from './pages/Settings'
+import { SmartRules } from './pages/SmartRules'
 
 export function App() {
   return (
@@ -26,6 +27,7 @@ export function App() {
         <Route path="/projections" element={<Projections />} />
         <Route path="/import" element={<ImportData />} />
         <Route path="/statistics" element={<Statistics />} />
+        <Route path="/smart-rules" element={<SmartRules />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

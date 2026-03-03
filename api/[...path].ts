@@ -509,12 +509,43 @@ async function handleTransactions(
       query = query.or(`description.ilike.%${s}%,notes.ilike.%${s}%`)
     }
 
+    // Tag filter: if tagId is specified, filter transactions that have that tag
+    const tagIdFilter = param('tagId')
+    if (tagIdFilter) {
+      const { data: taggedTxIds } = await sb
+        .from('transaction_tags')
+        .select('transaction_id')
+        .eq('tag_id', tagIdFilter)
+      const txIds = (taggedTxIds || []).map((r: Record<string, unknown>) => r.transaction_id as string)
+      if (txIds.length === 0) {
+        return ok(res, { rows: [], total: 0, limit, offset })
+      }
+      query = query.in('id', txIds)
+    }
+
     const { data, error, count } = await query
       .order('date', { ascending: false })
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1)
 
     if (error) throw error
+
+    // Fetch tags for all returned transactions in one query
+    const txIds = (data || []).map((r: Record<string, unknown>) => r.id as string)
+    let tagsByTxId = new Map<string, Array<Record<string, unknown>>>()
+    if (txIds.length > 0) {
+      const { data: allTagRows } = await sb
+        .from('transaction_tags')
+        .select('transaction_id, tags(id, name, type, color)')
+        .in('transaction_id', txIds)
+      if (allTagRows) {
+        for (const row of allTagRows as Array<Record<string, unknown>>) {
+          const tid = row.transaction_id as string
+          if (!tagsByTxId.has(tid)) tagsByTxId.set(tid, [])
+          if (row.tags) tagsByTxId.get(tid)!.push(row.tags as Record<string, unknown>)
+        }
+      }
+    }
 
     // Flatten joined objects
     const rows = (data || []).map((r: Record<string, unknown>) => {
@@ -527,6 +558,7 @@ async function handleTransactions(
       row.container_currency = containers?.currency ?? null
       row.counterparty_name = counterparties?.name ?? null
       row.shared_with_name = subjects?.name ?? null
+      row.tags = tagsByTxId.get(row.id as string) || []
       delete row.containers
       delete row.counterparties
       delete row.subjects
@@ -1869,10 +1901,229 @@ async function handleBudget(
 // ============================================================
 
 async function handleStats(
-  _req: VercelRequest,
+  req: VercelRequest,
   res: VercelResponse,
+  segments: string[],
 ) {
   const sb = getSupabase()
+  const subRoute = segments[1] || ''
+
+  // ── GET /stats/by-tag — breakdown per tag con somme e conteggi ──
+  if (subRoute === 'by-tag') {
+    const params = (req.query || {}) as Record<string, string | string[]>
+    const param = (k: string) => { const v = params[k]; return Array.isArray(v) ? v[0] : v }
+    const dateFrom = param('dateFrom')
+    const dateTo = param('dateTo')
+    const containerId = param('containerId')
+    const tagType = param('tagType') || 'category'
+    const direction = param('direction') || 'expense' // expense or income
+
+    // Get all tags of this type
+    const { data: allTags } = await sb
+      .from('tags')
+      .select('id, name, color, type, parent_id')
+      .eq('type', tagType)
+      .eq('is_active', true)
+      .order('name')
+
+    // Build transaction query
+    let txQuery = sb
+      .from('transactions')
+      .select('id, amount, date')
+      .neq('status', 'cancelled')
+    if (dateFrom) txQuery = txQuery.gte('date', dateFrom)
+    if (dateTo) txQuery = txQuery.lte('date', dateTo)
+    if (containerId) txQuery = txQuery.eq('container_id', containerId)
+    if (direction === 'expense') {
+      txQuery = txQuery.lt('amount', '0')
+    } else {
+      txQuery = txQuery.gt('amount', '0')
+    }
+
+    const { data: txs } = await txQuery
+    const txMap = new Map<string, { amount: number; date: string }>()
+    for (const tx of txs || []) {
+      txMap.set(tx.id as string, { amount: parseFloat(tx.amount as string) || 0, date: tx.date as string })
+    }
+
+    // Get all transaction_tags for these transactions
+    const txIds = [...txMap.keys()]
+    const tagTotals = new Map<string, { total: number; count: number }>()
+    let untaggedTotal = 0
+    let untaggedCount = 0
+    const taggedTxIds = new Set<string>()
+
+    if (txIds.length > 0) {
+      for (let i = 0; i < txIds.length; i += 500) {
+        const chunk = txIds.slice(i, i + 500)
+        const { data: ttRows } = await sb
+          .from('transaction_tags')
+          .select('transaction_id, tag_id')
+          .in('transaction_id', chunk)
+
+        for (const row of (ttRows || []) as Array<Record<string, unknown>>) {
+          const tid = row.transaction_id as string
+          const tagId = row.tag_id as string
+          const txData = txMap.get(tid)
+          if (!txData) continue
+          taggedTxIds.add(tid)
+          if (!tagTotals.has(tagId)) tagTotals.set(tagId, { total: 0, count: 0 })
+          const entry = tagTotals.get(tagId)!
+          entry.total += Math.abs(txData.amount)
+          entry.count += 1
+        }
+      }
+    }
+
+    // Calculate untagged
+    for (const [tid, txData] of txMap) {
+      if (!taggedTxIds.has(tid)) {
+        untaggedTotal += Math.abs(txData.amount)
+        untaggedCount += 1
+      }
+    }
+
+    const grandTotal = [...tagTotals.values()].reduce((s, e) => s + e.total, 0) + untaggedTotal
+
+    // Build result
+    const breakdown = (allTags || []).map((tag: Record<string, unknown>) => {
+      const entry = tagTotals.get(tag.id as string)
+      return {
+        tag_id: tag.id,
+        tag_name: tag.name,
+        tag_color: tag.color,
+        total: entry?.total ?? 0,
+        count: entry?.count ?? 0,
+        percentage: grandTotal > 0 ? ((entry?.total ?? 0) / grandTotal) * 100 : 0,
+      }
+    }).filter((b: { total: number }) => b.total > 0)
+    .sort((a: { total: number }, b: { total: number }) => b.total - a.total)
+
+    if (untaggedCount > 0) {
+      breakdown.push({
+        tag_id: null as unknown as string,
+        tag_name: 'Non categorizzato',
+        tag_color: '#6b7280',
+        total: untaggedTotal,
+        count: untaggedCount,
+        percentage: grandTotal > 0 ? (untaggedTotal / grandTotal) * 100 : 0,
+      })
+    }
+
+    return ok(res, { breakdown, grandTotal, transactionCount: txMap.size })
+  }
+
+  // ── GET /stats/monthly-trend — monthly income/expenses ──
+  if (subRoute === 'monthly-trend') {
+    const params = (req.query || {}) as Record<string, string | string[]>
+    const param = (k: string) => { const v = params[k]; return Array.isArray(v) ? v[0] : v }
+    const months = parseInt(param('months') || '6')
+    const containerId = param('containerId')
+
+    // Calculate start date (N months ago, first of month)
+    const now = new Date()
+    const startDate = new Date(now.getFullYear(), now.getMonth() - months + 1, 1)
+    const startStr = startDate.toISOString().slice(0, 10)
+
+    let query = sb
+      .from('transactions')
+      .select('date, amount, type')
+      .gte('date', startStr)
+      .neq('status', 'cancelled')
+    if (containerId) query = query.eq('container_id', containerId)
+
+    const { data: txs } = await query
+
+    // Group by month
+    const monthMap = new Map<string, { income: number; expenses: number }>()
+    for (const tx of txs || []) {
+      const month = (tx.date as string).slice(0, 7) // YYYY-MM
+      if (!monthMap.has(month)) monthMap.set(month, { income: 0, expenses: 0 })
+      const entry = monthMap.get(month)!
+      const amt = parseFloat(tx.amount as string) || 0
+      const type = tx.type as string
+      // Exclude transfers from income/expense stats
+      if (type === 'transfer_in' || type === 'transfer_out') continue
+      if (amt > 0) entry.income += amt
+      else entry.expenses += Math.abs(amt)
+    }
+
+    // Sort chronologically and format
+    const trend = [...monthMap.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([month, data]) => ({
+        month,
+        income: Math.round(data.income * 100) / 100,
+        expenses: Math.round(data.expenses * 100) / 100,
+        net: Math.round((data.income - data.expenses) * 100) / 100,
+      }))
+
+    return ok(res, { trend })
+  }
+
+  // ── GET /stats/burning-rate — daily spending rate and autonomy ──
+  if (subRoute === 'burning-rate') {
+    const params = (req.query || {}) as Record<string, string | string[]>
+    const param = (k: string) => { const v = params[k]; return Array.isArray(v) ? v[0] : v }
+    const days = parseInt(param('days') || '90')
+
+    const startDate = new Date()
+    startDate.setDate(startDate.getDate() - days)
+    const startStr = startDate.toISOString().slice(0, 10)
+
+    const { data: txs } = await sb
+      .from('transactions')
+      .select('amount, type')
+      .gte('date', startStr)
+      .eq('status', 'completed')
+      .not('type', 'in', '("transfer_in","transfer_out")')
+
+    let totalIncome = 0
+    let totalExpenses = 0
+    for (const tx of txs || []) {
+      const amt = parseFloat(tx.amount as string) || 0
+      if (amt > 0) totalIncome += amt
+      else totalExpenses += Math.abs(amt)
+    }
+
+    const dailyExpense = totalExpenses / days
+    const dailyIncome = totalIncome / days
+    const savingsRate = totalIncome > 0 ? ((totalIncome - totalExpenses) / totalIncome) * 100 : 0
+
+    // Get total balance for autonomy calculation
+    const { data: containers } = await sb
+      .from('containers')
+      .select('id, initial_balance')
+      .eq('is_active', true)
+    let totalBalance = 0
+    const activeIds = (containers || []).map((c: Record<string, unknown>) => {
+      totalBalance += parseFloat(c.initial_balance as string) || 0
+      return c.id as string
+    })
+    if (activeIds.length > 0) {
+      const { data: balanceTxs } = await sb
+        .from('transactions')
+        .select('amount')
+        .in('container_id', activeIds)
+        .neq('status', 'cancelled')
+      for (const tx of balanceTxs || []) {
+        totalBalance += parseFloat(tx.amount as string) || 0
+      }
+    }
+
+    const autonomyDays = dailyExpense > 0 ? Math.round(totalBalance / dailyExpense) : 9999
+
+    return ok(res, {
+      daily_expense: Math.round(dailyExpense * 100) / 100,
+      daily_income: Math.round(dailyIncome * 100) / 100,
+      savings_rate: Math.round(savingsRate * 10) / 10,
+      autonomy_days: autonomyDays,
+      total_balance: Math.round(totalBalance * 100) / 100,
+      period_days: days,
+    })
+  }
+
+  // ── Default: GET /stats — dashboard (original) ──
 
   // 1) Balances by currency (active containers + their transactions)
   const { data: containers } = await sb
@@ -1988,6 +2239,341 @@ async function handleStats(
 }
 
 // ============================================================
+// SMART RULES - Auto-categorization rules
+// ============================================================
+
+async function handleSmartRules(
+  req: VercelRequest,
+  res: VercelResponse,
+  id: string | null,
+) {
+  const sb = getSupabase()
+  const method = req.method
+
+  // GET list — all rules with joined tag/counterparty/container names
+  if (method === 'GET' && !id) {
+    const { data, error } = await sb
+      .from('smart_rules')
+      .select('*, tags!smart_rules_assign_tag_id_tags_id_fk(id, name, color, type), counterparties(name), containers(name)')
+      .order('priority', { ascending: false })
+      .order('name')
+    if (error) throw error
+
+    const rows = (data || []).map((r: Record<string, unknown>) => {
+      const row = { ...r } as Record<string, unknown>
+      const tag = row.tags as Record<string, unknown> | null
+      const cp = row.counterparties as { name?: string } | null
+      const ct = row.containers as { name?: string } | null
+      row.assign_tag = tag
+      row.counterparty_name = cp?.name ?? null
+      row.container_name = ct?.name ?? null
+      delete row.tags
+      delete row.counterparties
+      delete row.containers
+      return row
+    })
+    return ok(res, rows)
+  }
+
+  // POST-based actions
+  const bodyAction = (req.body as Record<string, unknown>)?._action
+
+  // POST create
+  if (method === 'POST' && !bodyAction) {
+    const b = req.body || {}
+    const { data, error } = await sb.from('smart_rules').insert({
+      name: b.name,
+      description_pattern: b.descriptionPattern ?? null,
+      counterparty_id: b.counterpartyId ?? null,
+      container_id: b.containerId ?? null,
+      amount_min: b.amountMin ?? null,
+      amount_max: b.amountMax ?? null,
+      transaction_type: b.transactionType ?? null,
+      assign_tag_id: b.assignTagId,
+      priority: b.priority ?? 0,
+      is_active: b.isActive ?? true,
+      auto_apply: b.autoApply ?? true,
+    }).select().single()
+    if (error) throw error
+    return created(res, data)
+  }
+
+  // POST update
+  if (method === 'POST' && bodyAction === 'update') {
+    const b = req.body || {}
+    const ruleId = b.id as string
+    if (!ruleId) return badRequest(res, 'id è obbligatorio')
+
+    const update: Record<string, unknown> = { updated_at: new Date().toISOString() }
+    if (b.name !== undefined) update.name = b.name
+    if (b.descriptionPattern !== undefined) update.description_pattern = b.descriptionPattern
+    if (b.counterpartyId !== undefined) update.counterparty_id = b.counterpartyId
+    if (b.containerId !== undefined) update.container_id = b.containerId
+    if (b.amountMin !== undefined) update.amount_min = b.amountMin
+    if (b.amountMax !== undefined) update.amount_max = b.amountMax
+    if (b.transactionType !== undefined) update.transaction_type = b.transactionType
+    if (b.assignTagId !== undefined) update.assign_tag_id = b.assignTagId
+    if (b.priority !== undefined) update.priority = b.priority
+    if (b.isActive !== undefined) update.is_active = b.isActive
+    if (b.autoApply !== undefined) update.auto_apply = b.autoApply
+
+    const { error } = await sb.from('smart_rules').update(update).eq('id', ruleId)
+    if (error) throw error
+    return ok(res, { updated: true })
+  }
+
+  // POST delete
+  if (method === 'POST' && bodyAction === 'delete') {
+    const ruleId = (req.body as Record<string, unknown>)?.id as string
+    if (!ruleId) return badRequest(res, 'id è obbligatorio')
+    const { error } = await sb.from('smart_rules').delete().eq('id', ruleId)
+    if (error) throw error
+    return ok(res, { deleted: true })
+  }
+
+  // POST auto-tag — apply all active rules to untagged transactions
+  if (method === 'POST' && bodyAction === 'auto-tag') {
+    const b = req.body || {}
+    const dryRun = !!b.dryRun
+    const limit = parseInt(b.limit as string) || 500
+
+    // 1. Get all active rules, ordered by priority desc
+    const { data: rules } = await sb
+      .from('smart_rules')
+      .select('*')
+      .eq('is_active', true)
+      .order('priority', { ascending: false })
+
+    if (!rules || rules.length === 0) {
+      return ok(res, { applied: 0, matches: [], message: 'Nessuna regola attiva' })
+    }
+
+    // 2. Get untagged transactions (those with no entry in transaction_tags)
+    // First get all transaction IDs that have at least one tag
+    const { data: taggedIds } = await sb
+      .from('transaction_tags')
+      .select('transaction_id')
+    const taggedSet = new Set((taggedIds || []).map((r: Record<string, unknown>) => r.transaction_id as string))
+
+    // Get recent transactions
+    const { data: txs } = await sb
+      .from('transactions')
+      .select('id, description, counterparty_id, container_id, amount, type')
+      .neq('status', 'cancelled')
+      .order('date', { ascending: false })
+      .limit(limit * 3) // Fetch more to filter for untagged
+
+    const untaggedTxs = (txs || []).filter((t: Record<string, unknown>) => !taggedSet.has(t.id as string)).slice(0, limit)
+
+    // 3. Match rules against untagged transactions
+    const matches: Array<{ transactionId: string; ruleId: string; ruleName: string; tagId: string; description: string }> = []
+
+    for (const tx of untaggedTxs) {
+      for (const rule of rules as Array<Record<string, unknown>>) {
+        let matched = true
+
+        // Check description pattern
+        if (rule.description_pattern) {
+          const pattern = (rule.description_pattern as string).toLowerCase()
+          const desc = ((tx.description as string) || '').toLowerCase()
+          if (!desc.includes(pattern)) {
+            // Try regex
+            try {
+              const regex = new RegExp(pattern, 'i')
+              if (!regex.test(desc)) matched = false
+            } catch {
+              matched = false
+            }
+          }
+        }
+
+        // Check counterparty
+        if (matched && rule.counterparty_id && tx.counterparty_id !== rule.counterparty_id) {
+          matched = false
+        }
+
+        // Check container
+        if (matched && rule.container_id && tx.container_id !== rule.container_id) {
+          matched = false
+        }
+
+        // Check amount range
+        if (matched && rule.amount_min) {
+          const txAmt = Math.abs(parseFloat(tx.amount as string))
+          if (txAmt < parseFloat(rule.amount_min as string)) matched = false
+        }
+        if (matched && rule.amount_max) {
+          const txAmt = Math.abs(parseFloat(tx.amount as string))
+          if (txAmt > parseFloat(rule.amount_max as string)) matched = false
+        }
+
+        // Check transaction type
+        if (matched && rule.transaction_type && tx.type !== rule.transaction_type) {
+          matched = false
+        }
+
+        if (matched) {
+          matches.push({
+            transactionId: tx.id as string,
+            ruleId: rule.id as string,
+            ruleName: rule.name as string,
+            tagId: rule.assign_tag_id as string,
+            description: (tx.description as string) || '(nessuna descrizione)',
+          })
+          break // First matching rule wins (highest priority)
+        }
+      }
+    }
+
+    // 4. Apply tags (if not dry run)
+    if (!dryRun && matches.length > 0) {
+      const inserts = matches.map(m => ({
+        transaction_id: m.transactionId,
+        tag_id: m.tagId,
+      }))
+      // Insert in chunks
+      for (let i = 0; i < inserts.length; i += 100) {
+        const chunk = inserts.slice(i, i + 100)
+        await sb.from('transaction_tags').upsert(chunk, {
+          onConflict: 'transaction_id,tag_id',
+          ignoreDuplicates: true,
+        })
+      }
+    }
+
+    return ok(res, {
+      applied: dryRun ? 0 : matches.length,
+      matches,
+      dryRun,
+      totalUntagged: untaggedTxs.length,
+      totalRules: rules.length,
+    })
+  }
+
+  // POST suggest-rules — analyze tagged transactions and suggest new rules
+  if (method === 'POST' && bodyAction === 'suggest-rules') {
+    // Fetch transactions that already have tags, with their counterparties and descriptions
+    const { data: taggedTxs } = await sb
+      .from('transaction_tags')
+      .select('transaction_id, tag_id, tags(id, name, color, type)')
+      .limit(2000)
+
+    if (!taggedTxs || taggedTxs.length === 0) {
+      return ok(res, { suggestions: [], message: 'Nessuna transazione taggata trovata per analisi' })
+    }
+
+    // Get the transactions themselves
+    const txIds = [...new Set((taggedTxs as Array<Record<string, unknown>>).map(r => r.transaction_id as string))]
+    const txMap = new Map<string, Record<string, unknown>>()
+    for (let i = 0; i < txIds.length; i += 500) {
+      const chunk = txIds.slice(i, i + 500)
+      const { data: txs } = await sb
+        .from('transactions')
+        .select('id, description, counterparty_id, container_id, amount, type, counterparties(name)')
+        .in('id', chunk)
+      for (const tx of txs || []) {
+        txMap.set(tx.id as string, tx as Record<string, unknown>)
+      }
+    }
+
+    // Build a map: tagId -> array of transactions
+    const tagTxMap = new Map<string, Array<{ tx: Record<string, unknown>; tagName: string; tagColor: string }>>()
+    for (const row of taggedTxs as Array<Record<string, unknown>>) {
+      const tagId = row.tag_id as string
+      const tag = row.tags as Record<string, unknown> | null
+      const tx = txMap.get(row.transaction_id as string)
+      if (!tx || !tag) continue
+      if (!tagTxMap.has(tagId)) tagTxMap.set(tagId, [])
+      tagTxMap.get(tagId)!.push({ tx, tagName: tag.name as string, tagColor: (tag.color as string) || '#6b7280' })
+    }
+
+    // For each tag, find common patterns
+    const suggestions: Array<{
+      tagId: string
+      tagName: string
+      tagColor: string
+      type: string // 'counterparty' | 'keyword' | 'amount_range'
+      pattern: string
+      confidence: number
+      exampleCount: number
+      ruleName: string
+    }> = []
+
+    // Get existing rules to avoid duplicates
+    const { data: existingRules } = await sb.from('smart_rules').select('description_pattern, counterparty_id, assign_tag_id')
+    const existingRuleKeys = new Set(
+      (existingRules || []).map((r: Record<string, unknown>) =>
+        `${r.description_pattern || ''}_${r.counterparty_id || ''}_${r.assign_tag_id}`,
+      ),
+    )
+
+    for (const [tagId, entries] of tagTxMap) {
+      if (entries.length < 2) continue // Need at least 2 transactions to suggest a pattern
+      const { tagName, tagColor } = entries[0]
+
+      // Pattern 1: Same counterparty
+      const counterpartyCounts = new Map<string, { count: number; name: string }>()
+      for (const { tx } of entries) {
+        const cpId = tx.counterparty_id as string | null
+        if (!cpId) continue
+        const cpObj = tx.counterparties as { name?: string } | null
+        if (!counterpartyCounts.has(cpId)) counterpartyCounts.set(cpId, { count: 0, name: cpObj?.name || 'Sconosciuto' })
+        counterpartyCounts.get(cpId)!.count++
+      }
+      for (const [cpId, { count, name }] of counterpartyCounts) {
+        if (count < 2) continue
+        const ruleKey = `_${cpId}_${tagId}`
+        if (existingRuleKeys.has(ruleKey)) continue
+        suggestions.push({
+          tagId,
+          tagName,
+          tagColor,
+          type: 'counterparty',
+          pattern: cpId,
+          confidence: Math.min(95, 50 + count * 10),
+          exampleCount: count,
+          ruleName: `${name} → ${tagName}`,
+        })
+      }
+
+      // Pattern 2: Common keywords in descriptions
+      const wordCounts = new Map<string, number>()
+      const stopWords = new Set(['di', 'del', 'della', 'il', 'la', 'le', 'lo', 'un', 'una', 'per', 'con', 'da', 'in', 'su', 'a', 'e', 'o', 'che', 'non', 'and', 'the', 'for', 'from', 'to', '-', '/', 'nr', 'n', 'pagamento', 'payment'])
+      for (const { tx } of entries) {
+        const desc = ((tx.description as string) || '').toLowerCase()
+        const words = desc.split(/[\s,;.:()\-/]+/).filter(w => w.length > 3 && !stopWords.has(w))
+        const uniqueWords = new Set(words)
+        for (const word of uniqueWords) {
+          wordCounts.set(word, (wordCounts.get(word) || 0) + 1)
+        }
+      }
+      for (const [word, count] of wordCounts) {
+        if (count < 3 || count / entries.length < 0.5) continue // At least 50% of transactions have this keyword
+        const ruleKey = `${word}__${tagId}`
+        if (existingRuleKeys.has(ruleKey)) continue
+        suggestions.push({
+          tagId,
+          tagName,
+          tagColor,
+          type: 'keyword',
+          pattern: word,
+          confidence: Math.min(90, 40 + count * 8),
+          exampleCount: count,
+          ruleName: `"${word}" → ${tagName}`,
+        })
+      }
+    }
+
+    // Sort by confidence desc, limit to top 20
+    suggestions.sort((a, b) => b.confidence - a.confidence)
+
+    return ok(res, { suggestions: suggestions.slice(0, 20) })
+  }
+
+  return badRequest(res, 'Metodo non supportato')
+}
+
+// ============================================================
 // MAIN ROUTER
 // ============================================================
 
@@ -2029,8 +2615,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return await handleRecurrences(req, res, segments[1] || null)
       case 'budget':
         return await handleBudget(req, res, segments)
+      case 'smart-rules':
+        return await handleSmartRules(req, res, segments[1] || null)
       case 'stats':
-        return await handleStats(req, res)
+        return await handleStats(req, res, segments)
       case 'health':
         return res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() })
       case '':
