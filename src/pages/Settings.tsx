@@ -2,13 +2,10 @@ import { useState } from 'react'
 import {
   Tag,
   FileInput,
-  Database,
   Download,
   Plus,
   Pencil,
   Trash2,
-  CheckCircle2,
-  RefreshCw,
   ChevronRight,
   X,
   Loader2,
@@ -63,7 +60,7 @@ export function Settings() {
       <div>
         <h1 className="text-2xl font-bold text-zinc-100">Impostazioni</h1>
         <p className="mt-1 text-sm text-zinc-400">
-          Configurazione tag, profili di import, database e esportazione dati
+          Configurazione tag, profili di import e esportazione dati
         </p>
       </div>
 
@@ -202,57 +199,6 @@ export function Settings() {
               ))}
             </tbody>
           </table>
-        </div>
-      </div>
-
-      {/* Database connection */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-        <div className="flex items-center gap-2 mb-4">
-          <Database className="h-5 w-5 text-purple-400" />
-          <h2 className="text-lg font-semibold text-zinc-100">Connessione Database</h2>
-        </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div>
-            <label className="block text-xs text-zinc-500 mb-1">Host</label>
-            <input
-              type="text"
-              value="ep-small-flower-agda4omk-pooler.c-2.eu-central-1.aws.neon.tech"
-              readOnly
-              className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-300 font-mono"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-zinc-500 mb-1">Database</label>
-            <input
-              type="text"
-              value="neondb"
-              readOnly
-              className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-300 font-mono"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-zinc-500 mb-1">Provider</label>
-            <input
-              type="text"
-              value="Neon (Postgres)"
-              readOnly
-              className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-300 font-mono"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-zinc-500 mb-1">Stato</label>
-            <div className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2">
-              <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-              <span className="text-sm text-emerald-400">Connesso</span>
-              <span className="text-xs text-zinc-500 ml-auto">11 subjects, 53 containers, 64 tags, 19 counterparties</span>
-            </div>
-          </div>
-        </div>
-        <div className="mt-4 flex items-center gap-3">
-          <button className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-600">
-            <RefreshCw className="h-4 w-4" />
-            Testa Connessione
-          </button>
         </div>
       </div>
 

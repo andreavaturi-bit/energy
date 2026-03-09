@@ -8,6 +8,13 @@
       "when": 1770477170705,
       "tag": "0000_loose_wong",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1773057726053,
+      "tag": "0001_faulty_warbird",
+      "breakpoints": true
     }
   ]
 }
