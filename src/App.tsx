@@ -10,6 +10,7 @@ import { ImportData } from './pages/ImportData'
 import { Statistics } from './pages/Statistics'
 import { Projections } from './pages/Projections'
 import { Pendenze } from './pages/Pendenze'
+import { Counterparties } from './pages/Counterparties'
 import { Settings } from './pages/Settings'
 import { SmartRules } from './pages/SmartRules'
 
@@ -21,6 +22,7 @@ export function App() {
         <Route path="/transactions" element={<Transactions />} />
         <Route path="/containers" element={<Containers />} />
         <Route path="/subjects" element={<Subjects />} />
+        <Route path="/counterparties" element={<Counterparties />} />
         <Route path="/budget" element={<Budget />} />
         <Route path="/recurrences" element={<Recurrences />} />
         <Route path="/pendenze" element={<Pendenze />} />
