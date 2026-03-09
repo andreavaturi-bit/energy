@@ -211,7 +211,7 @@ function TransactionModal({
         notes: form.notes || null,
         sharedWithSubjectId: form.sharedWithSubjectId || null,
         sharePercentage: form.sharePercentage || null,
-        tagIds: form.tagIds.length > 0 ? form.tagIds : undefined,
+        tagIds: form.tagIds,
       })
     }
   }
