@@ -24,6 +24,7 @@ import {
   Loader2,
   AlertCircle,
 } from 'lucide-react'
+import { SearchableSelect, SearchableMultiSelect } from '@/components/ui/SearchableSelect'
 import type { Transaction, TransactionType, TransactionStatus, Container, Counterparty, Subject, Tag } from '@/types'
 import {
   useTransactions,
@@ -170,15 +171,6 @@ function TransactionModal({
 
   const isTransfer = form.type === 'transfer'
 
-  function toggleTag(tagId: string) {
-    setForm(prev => ({
-      ...prev,
-      tagIds: prev.tagIds.includes(tagId)
-        ? prev.tagIds.filter(id => id !== tagId)
-        : [...prev.tagIds, tagId],
-    }))
-  }
-
   function handleSave() {
     if (!form.amount) return
 
@@ -250,9 +242,12 @@ function TransactionModal({
             </div>
             <div>
               <label className={labelCls}>Tipo *</label>
-              <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className={inputCls}>
-                {typeOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
+              <SearchableSelect
+                value={form.type}
+                onChange={(v) => setForm({ ...form, type: v })}
+                options={typeOptions.map((o) => ({ value: o.value, label: o.label }))}
+                placeholder="Tipo..."
+              />
             </div>
           </div>
 
@@ -270,12 +265,17 @@ function TransactionModal({
             </div>
             <div>
               <label className={labelCls}>Valuta</label>
-              <select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })} className={inputCls}>
-                <option value="EUR">EUR</option>
-                <option value="USD">USD</option>
-                <option value="GBP">GBP</option>
-                <option value="RON">RON</option>
-              </select>
+              <SearchableSelect
+                value={form.currency}
+                onChange={(v) => setForm({ ...form, currency: v })}
+                options={[
+                  { value: 'EUR', label: 'EUR' },
+                  { value: 'USD', label: 'USD' },
+                  { value: 'GBP', label: 'GBP' },
+                  { value: 'RON', label: 'RON' },
+                ]}
+                placeholder="Valuta"
+              />
             </div>
           </div>
 
@@ -284,21 +284,25 @@ function TransactionModal({
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={labelCls}>Conto di uscita *</label>
-                <select value={form.fromContainerId} onChange={(e) => setForm({ ...form, fromContainerId: e.target.value })} className={inputCls}>
-                  <option value="">— Seleziona —</option>
-                  {containers.filter((c) => c.isActive).map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
+                <SearchableSelect
+                  value={form.fromContainerId}
+                  onChange={(v) => setForm({ ...form, fromContainerId: v })}
+                  options={containers.filter((c) => c.isActive).map((c) => ({ value: c.id, label: c.name, color: c.color }))}
+                  placeholder="Seleziona..."
+                  allowEmpty
+                  emptyLabel="— Seleziona —"
+                />
               </div>
               <div>
                 <label className={labelCls}>Conto di entrata *</label>
-                <select value={form.toContainerId} onChange={(e) => setForm({ ...form, toContainerId: e.target.value })} className={inputCls}>
-                  <option value="">— Seleziona —</option>
-                  {containers.filter((c) => c.isActive).map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
+                <SearchableSelect
+                  value={form.toContainerId}
+                  onChange={(v) => setForm({ ...form, toContainerId: v })}
+                  options={containers.filter((c) => c.isActive).map((c) => ({ value: c.id, label: c.name, color: c.color }))}
+                  placeholder="Seleziona..."
+                  allowEmpty
+                  emptyLabel="— Seleziona —"
+                />
               </div>
               {form.fromContainerId && form.toContainerId && form.fromContainerId === form.toContainerId && (
                 <p className="col-span-2 text-xs text-amber-400">I due conti devono essere diversi</p>
@@ -309,22 +313,25 @@ function TransactionModal({
               {/* Container */}
               <div>
                 <label className={labelCls}>Contenitore *</label>
-                <select value={form.containerId} onChange={(e) => setForm({ ...form, containerId: e.target.value })} className={inputCls}>
-                  {containers.filter((c) => c.isActive).map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
+                <SearchableSelect
+                  value={form.containerId}
+                  onChange={(v) => setForm({ ...form, containerId: v })}
+                  options={containers.filter((c) => c.isActive).map((c) => ({ value: c.id, label: c.name, color: c.color }))}
+                  placeholder="Contenitore..."
+                />
               </div>
 
               {/* Counterparty */}
               <div>
                 <label className={labelCls}>Controparte</label>
-                <select value={form.counterpartyId} onChange={(e) => setForm({ ...form, counterpartyId: e.target.value })} className={inputCls}>
-                  <option value="">— Nessuna —</option>
-                  {counterparties.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
+                <SearchableSelect
+                  value={form.counterpartyId}
+                  onChange={(v) => setForm({ ...form, counterpartyId: v })}
+                  options={counterparties.map((c) => ({ value: c.id, label: c.name }))}
+                  placeholder="Controparte..."
+                  allowEmpty
+                  emptyLabel="— Nessuna —"
+                />
               </div>
             </>
           )}
@@ -332,9 +339,12 @@ function TransactionModal({
           {/* Status */}
           <div>
             <label className={labelCls}>Stato</label>
-            <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as TransactionStatus })} className={inputCls}>
-              {statusOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
+            <SearchableSelect
+              value={form.status}
+              onChange={(v) => setForm({ ...form, status: v as TransactionStatus })}
+              options={statusOptions.map((o) => ({ value: o.value, label: o.label }))}
+              placeholder="Stato..."
+            />
           </div>
 
           {/* Cost sharing — only for non-transfers */}
@@ -342,12 +352,14 @@ function TransactionModal({
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={labelCls}>Condiviso con</label>
-                <select value={form.sharedWithSubjectId} onChange={(e) => setForm({ ...form, sharedWithSubjectId: e.target.value })} className={inputCls}>
-                  <option value="">— Nessuno —</option>
-                  {subjects.filter((s) => s.role === 'partner').map((s) => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
+                <SearchableSelect
+                  value={form.sharedWithSubjectId}
+                  onChange={(v) => setForm({ ...form, sharedWithSubjectId: v })}
+                  options={subjects.filter((s) => s.role === 'partner').map((s) => ({ value: s.id, label: s.name }))}
+                  placeholder="Soggetto..."
+                  allowEmpty
+                  emptyLabel="— Nessuno —"
+                />
               </div>
               {form.sharedWithSubjectId && (
                 <div>
@@ -362,29 +374,12 @@ function TransactionModal({
           {tags.length > 0 && (
             <div>
               <label className={labelCls}>Tag</label>
-              <div className="flex flex-wrap gap-1.5">
-                {tags.filter(t => t.isActive).map(tag => {
-                  const selected = form.tagIds.includes(tag.id)
-                  return (
-                    <button
-                      key={tag.id}
-                      type="button"
-                      onClick={() => toggleTag(tag.id)}
-                      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-all ${
-                        selected
-                          ? 'ring-2 ring-energy-500 bg-zinc-700 text-zinc-100'
-                          : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300'
-                      }`}
-                    >
-                      <span
-                        className="h-2 w-2 rounded-full shrink-0"
-                        style={{ backgroundColor: tag.color || '#6b7280' }}
-                      />
-                      {tag.name}
-                    </button>
-                  )
-                })}
-              </div>
+              <SearchableMultiSelect
+                value={form.tagIds}
+                onChange={(ids) => setForm({ ...form, tagIds: ids })}
+                options={tags.filter(t => t.isActive).map(t => ({ value: t.id, label: t.name, color: t.color }))}
+                placeholder="Seleziona tag..."
+              />
             </div>
           )}
 
@@ -886,60 +881,48 @@ export function Transactions() {
           </div>
 
           {/* Container dropdown */}
-          <select
+          <SearchableSelect
             value={containerId}
-            onChange={(e) => setContainerId(e.target.value)}
-            className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-300 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500"
-          >
-            <option value="">Contenitore</option>
-            {containerOptions.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+            onChange={setContainerId}
+            options={containerOptions.map((c) => ({ value: c.id, label: c.name, color: c.color }))}
+            placeholder="Contenitore"
+            allowEmpty
+            emptyLabel="Tutti i contenitori"
+            className="min-w-[160px]"
+          />
 
           {/* Type dropdown */}
-          <select
+          <SearchableSelect
             value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value)}
-            className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-300 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500"
-          >
-            <option value="">Tipo</option>
-            {filterTypeOptions.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+            onChange={setTypeFilter}
+            options={filterTypeOptions.map((o) => ({ value: o.value, label: o.label }))}
+            placeholder="Tipo"
+            allowEmpty
+            emptyLabel="Tutti i tipi"
+            className="min-w-[140px]"
+          />
 
           {/* Status dropdown */}
-          <select
+          <SearchableSelect
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-300 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500"
-          >
-            <option value="">Stato</option>
-            {statusOptions.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+            onChange={setStatusFilter}
+            options={statusOptions.map((o) => ({ value: o.value, label: o.label }))}
+            placeholder="Stato"
+            allowEmpty
+            emptyLabel="Tutti gli stati"
+            className="min-w-[130px]"
+          />
 
           {/* Tag dropdown */}
-          <select
+          <SearchableSelect
             value={tagFilter}
-            onChange={(e) => setTagFilter(e.target.value)}
-            className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-300 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500"
-          >
-            <option value="">Tag</option>
-            {tags.filter(t => t.isActive).map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
+            onChange={setTagFilter}
+            options={tags.filter(t => t.isActive).map((t) => ({ value: t.id, label: t.name, color: t.color }))}
+            placeholder="Tag"
+            allowEmpty
+            emptyLabel="Tutti i tag"
+            className="min-w-[130px]"
+          />
 
           {/* Clear filters */}
           {hasFilters && (
