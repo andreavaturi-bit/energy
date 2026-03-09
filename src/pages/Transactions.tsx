@@ -531,7 +531,8 @@ export function Transactions() {
         setTransferSaving(false)
       }
     } else {
-      createMutation.mutate(data as Partial<Transaction>, {
+      const tagIds = (data.tagIds as string[] | undefined) ?? []
+      createMutation.mutate({ ...(data as Partial<Transaction>), tagIds } as Partial<Transaction> & { tagIds?: string[] }, {
         onSuccess: () => setShowCreate(false),
       })
     }
@@ -563,8 +564,9 @@ export function Transactions() {
         setTransferSaving(false)
       }
     } else {
+      const tagIds = (data.tagIds as string[] | undefined) ?? []
       updateMutation.mutate(
-        { id: editingTx.id, data: data as Partial<Transaction> },
+        { id: editingTx.id, data: { ...(data as Partial<Transaction>), tagIds } },
         { onSuccess: () => setEditingTx(null) },
       )
     }
