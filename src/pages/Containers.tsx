@@ -653,7 +653,7 @@ export function Containers() {
 
                       {/* Balance */}
                       <div className="mt-2">
-                        <p className="text-xs text-zinc-500">Saldo</p>
+                        <p className="text-xs text-zinc-500">Saldo Attuale</p>
                         <p
                           className={`text-xl font-bold ${
                             balance < 0 ? 'text-red-400' : 'text-zinc-100'
@@ -661,6 +661,11 @@ export function Containers() {
                         >
                           {formatCurrency(balance, container.currency)}
                         </p>
+                        {container.initialBalance && container.initialBalance !== '0' && (
+                          <p className="text-[10px] text-zinc-500 mt-0.5">
+                            Saldo iniziale: {formatCurrency(parseFloat(container.initialBalance), container.currency)}
+                          </p>
+                        )}
                       </div>
 
                       {/* Footer: currency badge + multi-currency indicator */}

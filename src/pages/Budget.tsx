@@ -32,49 +32,10 @@ interface BudgetPeriodData {
 }
 
 // ---------------------------------------------------------------------------
-// Initial mock data
+// Initial data — empty, no mock data
 // ---------------------------------------------------------------------------
 
-const initialPeriods: BudgetPeriodData[] = [
-  {
-    id: 'bp-feb-2026',
-    name: 'Febbraio 2026',
-    startDate: '2026-02-01',
-    endDate: '2026-02-28',
-    allocations: [
-      { id: 'ba-1', category: 'Affitto', tagId: 't-affitto', allocated: 950, actual: 950 },
-      { id: 'ba-2', category: 'Bollette', tagId: 't-bollette', allocated: 400, actual: 342 },
-      { id: 'ba-3', category: 'Spesa alimentare', tagId: 't-spesa', allocated: 500, actual: 437 },
-      { id: 'ba-4', category: 'Trasporti', allocated: 200, actual: 185 },
-      { id: 'ba-5', category: 'Ristorazione', allocated: 250, actual: 312 },
-      { id: 'ba-6', category: 'Subscriptions', allocated: 150, actual: 128 },
-      { id: 'ba-7', category: 'Salute', allocated: 100, actual: 45 },
-      { id: 'ba-8', category: 'Abbigliamento', allocated: 150, actual: 89 },
-      { id: 'ba-9', category: 'Tecnologia', allocated: 100, actual: 0 },
-      { id: 'ba-10', category: 'Viaggi & Vacanze', allocated: 300, actual: 0 },
-      { id: 'ba-11', category: 'Altro', allocated: 200, actual: 156 },
-    ],
-  },
-  {
-    id: 'bp-gen-2026',
-    name: 'Gennaio 2026',
-    startDate: '2026-01-01',
-    endDate: '2026-01-31',
-    allocations: [
-      { id: 'ba-20', category: 'Affitto', tagId: 't-affitto', allocated: 950, actual: 950 },
-      { id: 'ba-21', category: 'Bollette', tagId: 't-bollette', allocated: 400, actual: 380 },
-      { id: 'ba-22', category: 'Spesa alimentare', tagId: 't-spesa', allocated: 500, actual: 510 },
-      { id: 'ba-23', category: 'Trasporti', allocated: 200, actual: 170 },
-      { id: 'ba-24', category: 'Ristorazione', allocated: 250, actual: 220 },
-      { id: 'ba-25', category: 'Subscriptions', allocated: 150, actual: 150 },
-      { id: 'ba-26', category: 'Salute', allocated: 100, actual: 0 },
-      { id: 'ba-27', category: 'Abbigliamento', allocated: 150, actual: 200 },
-      { id: 'ba-28', category: 'Tecnologia', allocated: 100, actual: 50 },
-      { id: 'ba-29', category: 'Viaggi & Vacanze', allocated: 300, actual: 450 },
-      { id: 'ba-30', category: 'Altro', allocated: 200, actual: 200 },
-    ],
-  },
-]
+const initialPeriods: BudgetPeriodData[] = []
 
 // ---------------------------------------------------------------------------
 // Period Modal
