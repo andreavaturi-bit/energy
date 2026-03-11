@@ -1,12 +1,35 @@
+import { useState } from 'react'
 import {
   FileInput,
   Download,
   Plus,
   Pencil,
   Trash2,
+  Database,
+  Loader2,
 } from 'lucide-react'
 
+const API_BASE = import.meta.env.VITE_API_URL || '/api'
+
 export function Settings() {
+  const [seedLoading, setSeedLoading] = useState(false)
+  const [seedResult, setSeedResult] = useState<string | null>(null)
+
+  async function handleSeed() {
+    if (!confirm('Questo importerà le categorie, tag e controparti dai dati Notion. Continuare?')) return
+    setSeedLoading(true)
+    setSeedResult(null)
+    try {
+      const resp = await fetch(`${API_BASE}/seed`, { method: 'POST' })
+      const json = await resp.json()
+      const data = json.data || json
+      setSeedResult(data.results?.join('\n') || 'Completato!')
+    } catch (err) {
+      setSeedResult(`Errore: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setSeedLoading(false)
+    }
+  }
   const importProfiles = [
     { id: '1', name: 'Intesa Sanpaolo - Conto AV', container: 'Intesa Sanpaolo 2767', fileType: 'CSV', delimiter: ';', encoding: 'ISO-8859-1', dateFormat: 'DD/MM/YYYY' },
     { id: '2', name: 'Revolut - Andrea EUR', container: 'Revolut Andrea', fileType: 'CSV', delimiter: ',', encoding: 'UTF-8', dateFormat: 'YYYY-MM-DD' },
@@ -79,6 +102,29 @@ export function Settings() {
             </tbody>
           </table>
         </div>
+      </div>
+
+      {/* Seed from Notion */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <Database className="h-5 w-5 text-energy-400" />
+          <h2 className="text-lg font-semibold text-zinc-100">Importa Dati Notion</h2>
+        </div>
+        <p className="text-sm text-zinc-400 mb-4">
+          Importa categorie (Aree → Categorie), attività e controparti dai dati Notion esportati.
+          I tag e controparti non utilizzati verranno rimossi prima dell'importazione.
+        </p>
+        <button
+          onClick={handleSeed}
+          disabled={seedLoading}
+          className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors disabled:opacity-50"
+        >
+          {seedLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}
+          {seedLoading ? 'Importazione in corso...' : 'Importa Categorie e Controparti'}
+        </button>
+        {seedResult && (
+          <pre className="mt-4 rounded-lg bg-zinc-800 p-4 text-xs text-zinc-300 whitespace-pre-wrap">{seedResult}</pre>
+        )}
       </div>
 
       {/* Export data */}
