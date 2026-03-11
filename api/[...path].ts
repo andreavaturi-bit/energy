@@ -2028,19 +2028,29 @@ async function handleStats(
   if (subRoute === 'monthly-trend') {
     const params = (req.query || {}) as Record<string, string | string[]>
     const param = (k: string) => { const v = params[k]; return Array.isArray(v) ? v[0] : v }
-    const months = parseInt(param('months') || '6')
+    const dateFrom = param('dateFrom')
+    const dateTo = param('dateTo')
     const containerId = param('containerId')
 
-    // Calculate start date (N months ago, first of month)
-    const now = new Date()
-    const startDate = new Date(now.getFullYear(), now.getMonth() - months + 1, 1)
-    const startStr = startDate.toISOString().slice(0, 10)
+    // Fallback: if no dateFrom, use months param (backwards compat)
+    let startStr: string
+    let endStr: string | undefined
+    if (dateFrom) {
+      startStr = dateFrom
+      endStr = dateTo || undefined
+    } else {
+      const months = parseInt(param('months') || '6')
+      const now = new Date()
+      const startDate = new Date(now.getFullYear(), now.getMonth() - months + 1, 1)
+      startStr = startDate.toISOString().slice(0, 10)
+    }
 
     let query = sb
       .from('transactions')
       .select('date, amount, type')
       .gte('date', startStr)
       .neq('status', 'cancelled')
+    if (endStr) query = query.lte('date', endStr)
     if (containerId) query = query.eq('container_id', containerId)
 
     const { data: txs } = await query

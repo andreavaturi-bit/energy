@@ -8,8 +8,6 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   Calendar,
-  ChevronDown,
-  ChevronUp,
 } from 'lucide-react'
 import { statsApi, type TagBreakdownItem, type MonthlyTrendItem, type BurningRateStats } from '@/lib/api'
 import { useContainers } from '@/lib/hooks'
@@ -124,13 +122,6 @@ export function Statistics() {
     setDateTo(d.to)
   }, [preset])
 
-  // Compute months count for trend endpoint
-  const monthsCount = useMemo(() => {
-    const from = new Date(dateFrom)
-    const to = new Date(dateTo)
-    return Math.max(1, Math.ceil((to.getTime() - from.getTime()) / (30.44 * 24 * 60 * 60 * 1000)))
-  }, [dateFrom, dateTo])
-
   // Stats state
   const [breakdown, setBreakdown] = useState<TagBreakdownItem[]>([])
   const [grandTotal, setGrandTotal] = useState(0)
@@ -141,7 +132,7 @@ export function Statistics() {
   const [loadingTrend, setLoadingTrend] = useState(true)
   const [loadingBurning, setLoadingBurning] = useState(true)
   const [errors, setErrors] = useState<string[]>([])
-  const [trendTableExpanded, setTrendTableExpanded] = useState(false)
+
 
   // Fetch tag breakdown
   useEffect(() => {
@@ -169,7 +160,8 @@ export function Statistics() {
   useEffect(() => {
     setLoadingTrend(true)
     statsApi.getMonthlyTrend({
-      months: monthsCount,
+      dateFrom,
+      dateTo,
       containerId: containerId || undefined,
     }).then(data => {
       setTrend(data.trend || [])
@@ -179,7 +171,7 @@ export function Statistics() {
       setTrend([])
     })
     .finally(() => setLoadingTrend(false))
-  }, [monthsCount, containerId])
+  }, [dateFrom, dateTo, containerId])
 
   // Fetch burning rate
   useEffect(() => {
@@ -249,11 +241,6 @@ export function Statistics() {
     return { min: Math.min(...vals), max: Math.max(...vals) }
   }, [equityLine])
 
-  // Trend table: show only last 12 rows by default, expand to see all
-  const trendTableRows = useMemo(() => {
-    if (trendTableExpanded || trend.length <= 12) return trend
-    return trend.slice(-12)
-  }, [trend, trendTableExpanded])
 
   return (
     <div className="space-y-6">
@@ -516,9 +503,9 @@ export function Statistics() {
               </div>
 
               {/* Trend data table */}
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
                 <table className="w-full text-xs">
-                  <thead>
+                  <thead className="sticky top-0 bg-zinc-900">
                     <tr className="border-b border-zinc-800 text-left">
                       <th className="pb-2 font-medium text-zinc-500">Mese</th>
                       <th className="pb-2 font-medium text-emerald-500 text-right">Entrate</th>
@@ -527,20 +514,7 @@ export function Statistics() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-800/50">
-                    {!trendTableExpanded && trend.length > 12 && (
-                      <tr>
-                        <td colSpan={4} className="py-1 text-center">
-                          <button
-                            onClick={() => setTrendTableExpanded(true)}
-                            className="text-xs text-zinc-500 hover:text-zinc-300 flex items-center gap-1 mx-auto"
-                          >
-                            <ChevronUp className="h-3 w-3" />
-                            Mostra tutti i {trend.length} mesi
-                          </button>
-                        </td>
-                      </tr>
-                    )}
-                    {trendTableRows.map(row => (
+                    {trend.map(row => (
                       <tr key={row.month}>
                         <td className="py-1.5 text-zinc-400">{formatMonth(row.month)}</td>
                         <td className="py-1.5 text-emerald-400 text-right">
@@ -555,20 +529,7 @@ export function Statistics() {
                       </tr>
                     ))}
                   </tbody>
-                  <tfoot>
-                    {trendTableExpanded && trend.length > 12 && (
-                      <tr>
-                        <td colSpan={4} className="py-1 text-center">
-                          <button
-                            onClick={() => setTrendTableExpanded(false)}
-                            className="text-xs text-zinc-500 hover:text-zinc-300 flex items-center gap-1 mx-auto"
-                          >
-                            <ChevronDown className="h-3 w-3" />
-                            Mostra solo ultimi 12 mesi
-                          </button>
-                        </td>
-                      </tr>
-                    )}
+                  <tfoot className="sticky bottom-0 bg-zinc-900">
                     <tr className="border-t border-zinc-700">
                       <td className="py-2 text-zinc-300 font-semibold">Totale</td>
                       <td className="py-2 text-emerald-400 text-right font-semibold">

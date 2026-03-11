@@ -308,7 +308,7 @@ export const statsApi = {
     const qs = params ? '?' + new URLSearchParams(Object.entries(params).filter(([, v]) => v) as string[][]).toString() : ''
     return api.get<{ breakdown: TagBreakdownItem[]; grandTotal: number; transactionCount: number }>(`/stats/by-tag${qs}`)
   },
-  getMonthlyTrend: (params?: { months?: number; containerId?: string }) => {
+  getMonthlyTrend: (params?: { months?: number; dateFrom?: string; dateTo?: string; containerId?: string }) => {
     const qs = params ? '?' + new URLSearchParams(
       Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)]),
     ).toString() : ''
