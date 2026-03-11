@@ -2594,20 +2594,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   setCors(res)
   if (req.method === 'OPTIONS') return res.status(204).end()
 
-  // Extract path segments from catch-all query param
-  const pathParam = req.query.path
-  let segments: string[]
-
-  if (pathParam) {
-    segments = Array.isArray(pathParam) ? pathParam : [pathParam]
-  } else {
-    // Fallback: parse from req.url (needed for non-Next.js Vercel projects
-    // where req.query.path may not be populated by the catch-all route)
-    const url = req.url || ''
-    const pathPart = url.split('?')[0]
-    const apiPath = pathPart.replace(/^\/api\/?/, '')
-    segments = apiPath ? apiPath.split('/').filter(Boolean) : []
-  }
+  // Extract path segments — always parse from req.url for reliability
+  // (Vercel rewrites can alter req.query.path, making it unreliable)
+  const url = req.url || ''
+  const pathPart = url.split('?')[0]
+  const apiPath = pathPart.replace(/^\/api\/?/, '')
+  const segments = apiPath ? apiPath.split('/').filter(Boolean) : []
 
   const resource = segments[0] || ''
 
