@@ -500,6 +500,7 @@ async function handleTransactions(
       )
 
     if (param('containerId')) query = query.eq('container_id', param('containerId')!)
+    if (param('counterpartyId')) query = query.eq('counterparty_id', param('counterpartyId')!)
     if (param('type')) query = query.eq('type', param('type')!)
     if (param('status')) query = query.eq('status', param('status')!)
     if (param('dateFrom')) query = query.gte('date', param('dateFrom')!)
@@ -1989,9 +1990,9 @@ async function handleStats(
     const breakdown = (allTags || []).map((tag: Record<string, unknown>) => {
       const entry = tagTotals.get(tag.id as string)
       return {
-        tag_id: tag.id,
-        tag_name: tag.name,
-        tag_color: tag.color,
+        tagId: tag.id,
+        tagName: tag.name,
+        tagColor: tag.color,
         total: entry?.total ?? 0,
         count: entry?.count ?? 0,
         percentage: grandTotal > 0 ? ((entry?.total ?? 0) / grandTotal) * 100 : 0,
@@ -2001,9 +2002,9 @@ async function handleStats(
 
     if (untaggedCount > 0) {
       breakdown.push({
-        tag_id: null as unknown as string,
-        tag_name: 'Non categorizzato',
-        tag_color: '#6b7280',
+        tagId: null as unknown as string,
+        tagName: 'Non categorizzato',
+        tagColor: '#6b7280',
         total: untaggedTotal,
         count: untaggedCount,
         percentage: grandTotal > 0 ? (untaggedTotal / grandTotal) * 100 : 0,
@@ -2114,12 +2115,12 @@ async function handleStats(
     const autonomyDays = dailyExpense > 0 ? Math.round(totalBalance / dailyExpense) : 9999
 
     return ok(res, {
-      daily_expense: Math.round(dailyExpense * 100) / 100,
-      daily_income: Math.round(dailyIncome * 100) / 100,
-      savings_rate: Math.round(savingsRate * 10) / 10,
-      autonomy_days: autonomyDays,
-      total_balance: Math.round(totalBalance * 100) / 100,
-      period_days: days,
+      dailyExpense: Math.round(dailyExpense * 100) / 100,
+      dailyIncome: Math.round(dailyIncome * 100) / 100,
+      savingsRate: Math.round(savingsRate * 10) / 10,
+      autonomyDays: autonomyDays,
+      totalBalance: Math.round(totalBalance * 100) / 100,
+      periodDays: days,
     })
   }
 

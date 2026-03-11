@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Plus,
   Search,
@@ -49,6 +50,7 @@ const emptyForm: CounterpartyFormData = {
 }
 
 export function Counterparties() {
+  const navigate = useNavigate()
   const { data: counterparties = [], isLoading, isError, error } = useCounterparties()
   const createCounterparty = useCreateCounterparty()
   const updateCounterparty = useUpdateCounterparty()
@@ -258,7 +260,16 @@ export function Counterparties() {
                           <Icon className={`h-4 w-4 ${cfg.color.split(' ')[1]}`} />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-zinc-200 truncate">{cp.name}</p>
+                          <button
+                            className="text-sm font-medium text-zinc-200 truncate hover:text-energy-400 transition-colors text-left"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              navigate(`/transactions?counterpartyId=${cp.id}`)
+                            }}
+                            title={`Vedi transazioni di "${cp.name}"`}
+                          >
+                            {cp.name}
+                          </button>
                           {cp.defaultCategory && (
                             <p className="text-xs text-zinc-500">Categoria: {cp.defaultCategory}</p>
                           )}

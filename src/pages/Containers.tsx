@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Plus,
   Search,
@@ -303,6 +304,7 @@ function ContainerModal({
 // ---------------------------------------------------------------------------
 
 export function Containers() {
+  const navigate = useNavigate()
   const { data: containers = [], isLoading: containersLoading, error: containersError } = useContainers()
   const { data: subjects = [], isLoading: subjectsLoading } = useSubjects()
   const createContainer = useCreateContainer()
@@ -581,6 +583,7 @@ export function Containers() {
                     <div
                       key={container.id}
                       className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 hover:border-zinc-600 transition-colors cursor-pointer"
+                      onClick={() => navigate(`/transactions?containerId=${container.id}`)}
                     >
                       {/* Top row: color dot + name + status */}
                       <div className="flex items-start justify-between">

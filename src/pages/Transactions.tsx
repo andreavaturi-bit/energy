@@ -1,4 +1,5 @@
 import { useMemo, useState, useCallback, useEffect, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   useReactTable,
   getCoreRowModel,
@@ -419,17 +420,19 @@ function TransactionModal({
 // ── Component ───────────────────────────────────────────────
 
 export function Transactions() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [showCreate, setShowCreate] = useState(false)
   const [editingTx, setEditingTx] = useState<Transaction | null>(null)
 
-  // Filter state
-  const [searchText, setSearchText] = useState('')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
-  const [containerId, setContainerId] = useState('')
-  const [typeFilter, setTypeFilter] = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
-  const [tagFilter, setTagFilter] = useState('')
+  // Filter state — initialized from URL search params if present
+  const [searchText, setSearchText] = useState(searchParams.get('search') || '')
+  const [dateFrom, setDateFrom] = useState(searchParams.get('dateFrom') || '')
+  const [dateTo, setDateTo] = useState(searchParams.get('dateTo') || '')
+  const [containerId, setContainerId] = useState(searchParams.get('containerId') || '')
+  const [counterpartyId, setCounterpartyId] = useState(searchParams.get('counterpartyId') || '')
+  const [typeFilter, setTypeFilter] = useState(searchParams.get('type') || '')
+  const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || '')
+  const [tagFilter, setTagFilter] = useState(searchParams.get('tagId') || '')
 
   // Table state
   const [sorting, setSorting] = useState<SortingState>([
@@ -440,15 +443,23 @@ export function Transactions() {
   // Debounce ALL filter values (300ms) so that date pickers, search input,
   // and dropdowns never trigger an API call while the user is still interacting.
   const [debouncedFilters, setDebouncedFilters] = useState({
-    searchText, dateFrom, dateTo, containerId, typeFilter, statusFilter, tagFilter,
+    searchText, dateFrom, dateTo, containerId, counterpartyId, typeFilter, statusFilter, tagFilter,
   })
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => {
     debounceRef.current = setTimeout(() => {
-      setDebouncedFilters({ searchText, dateFrom, dateTo, containerId, typeFilter, statusFilter, tagFilter })
+      setDebouncedFilters({ searchText, dateFrom, dateTo, containerId, counterpartyId, typeFilter, statusFilter, tagFilter })
     }, 300)
     return () => clearTimeout(debounceRef.current)
-  }, [searchText, dateFrom, dateTo, containerId, typeFilter, statusFilter, tagFilter])
+  }, [searchText, dateFrom, dateTo, containerId, counterpartyId, typeFilter, statusFilter, tagFilter])
+
+  // Clear URL search params after initial load so they don't persist on navigation
+  useEffect(() => {
+    if (searchParams.toString()) {
+      setSearchParams({}, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // ── Build API query params from debounced filter state ─────
   const queryParams = useMemo(() => {
@@ -460,6 +471,7 @@ export function Transactions() {
     if (debouncedFilters.dateFrom) params.dateFrom = debouncedFilters.dateFrom
     if (debouncedFilters.dateTo) params.dateTo = debouncedFilters.dateTo
     if (debouncedFilters.containerId) params.containerId = debouncedFilters.containerId
+    if (debouncedFilters.counterpartyId) params.counterpartyId = debouncedFilters.counterpartyId
     if (debouncedFilters.typeFilter) params.type = debouncedFilters.typeFilter
     if (debouncedFilters.statusFilter) params.status = debouncedFilters.statusFilter
     if (debouncedFilters.tagFilter) params.tagId = debouncedFilters.tagFilter
@@ -607,6 +619,7 @@ export function Transactions() {
     dateFrom !== '' ||
     dateTo !== '' ||
     containerId !== '' ||
+    counterpartyId !== '' ||
     typeFilter !== '' ||
     statusFilter !== '' ||
     tagFilter !== ''
@@ -616,6 +629,7 @@ export function Transactions() {
     setDateFrom('')
     setDateTo('')
     setContainerId('')
+    setCounterpartyId('')
     setTypeFilter('')
     setStatusFilter('')
     setTagFilter('')
@@ -891,6 +905,17 @@ export function Transactions() {
             allowEmpty
             emptyLabel="Tutti i contenitori"
             className="min-w-[160px]"
+          />
+
+          {/* Counterparty dropdown */}
+          <SearchableSelect
+            value={counterpartyId}
+            onChange={setCounterpartyId}
+            options={counterparties.map((c) => ({ value: c.id, label: c.name }))}
+            placeholder="Controparte"
+            allowEmpty
+            emptyLabel="Tutte le controparti"
+            className="min-w-[150px]"
           />
 
           {/* Type dropdown */}

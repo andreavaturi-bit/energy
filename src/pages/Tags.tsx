@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Plus,
   Pencil,
@@ -24,8 +25,8 @@ import type { Tag, TagType } from '@/types'
 const typeLabels: Record<TagType, string> = {
   scope: 'Ambito',
   category: 'Categoria',
-  purpose: 'Finalita\'',
-  custom: 'Custom',
+  purpose: 'Tag',
+  custom: 'Tag',
 }
 
 const typeIcons: Record<TagType, typeof Layers> = {
@@ -39,7 +40,7 @@ const typeColors: Record<TagType, string> = {
   scope: 'text-purple-400 bg-purple-500/10',
   category: 'text-blue-400 bg-blue-500/10',
   purpose: 'text-emerald-400 bg-emerald-500/10',
-  custom: 'text-zinc-400 bg-zinc-500/10',
+  custom: 'text-emerald-400 bg-emerald-500/10',
 }
 
 // ── Tree node type ──────────────────────────────────────────
@@ -102,6 +103,7 @@ function flattenTree(nodes: TagNode[], expanded: Set<string>): TagNode[] {
 // ── Main component ──────────────────────────────────────────
 
 export function Tags() {
+  const navigate = useNavigate()
   const { data: tags = [], isLoading, isError, error } = useTags()
   const createTag = useCreateTag()
   const updateTag = useUpdateTag()
@@ -331,7 +333,13 @@ export function Tags() {
 
                   {/* Name and type */}
                   <div className="flex-1 min-w-0 flex items-center gap-2">
-                    <span className="text-sm font-medium text-zinc-200 truncate">{node.name}</span>
+                    <button
+                      className="text-sm font-medium text-zinc-200 truncate hover:text-energy-400 transition-colors text-left"
+                      onClick={() => navigate(`/transactions?tagId=${node.id}`)}
+                      title={`Vedi transazioni con tag "${node.name}"`}
+                    >
+                      {node.name}
+                    </button>
                     <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium shrink-0 ${typeColors[node.type]}`}>
                       <TypeIcon className="h-2.5 w-2.5" />
                       {typeLabels[node.type]}
