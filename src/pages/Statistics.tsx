@@ -132,10 +132,12 @@ export function Statistics() {
   const [loadingBreakdown, setLoadingBreakdown] = useState(true)
   const [loadingTrend, setLoadingTrend] = useState(true)
   const [loadingBurning, setLoadingBurning] = useState(true)
+  const [errors, setErrors] = useState<string[]>([])
 
   // Fetch tag breakdown
   useEffect(() => {
     setLoadingBreakdown(true)
+    setErrors([])
     statsApi.getByTag({
       dateFrom,
       dateTo,
@@ -145,7 +147,9 @@ export function Statistics() {
       setBreakdown(data.breakdown || [])
       setGrandTotal(data.grandTotal || 0)
       setTxCount(data.transactionCount || 0)
-    }).catch(() => {
+    }).catch((err) => {
+      console.error('Stats by-tag error:', err)
+      setErrors(prev => [...prev, `Breakdown: ${err.message}`])
       setBreakdown([])
       setGrandTotal(0)
       setTxCount(0)
@@ -160,7 +164,11 @@ export function Statistics() {
       containerId: containerId || undefined,
     }).then(data => {
       setTrend(data.trend || [])
-    }).catch(() => setTrend([]))
+    }).catch((err) => {
+      console.error('Stats monthly-trend error:', err)
+      setErrors(prev => [...prev, `Trend: ${err.message}`])
+      setTrend([])
+    })
     .finally(() => setLoadingTrend(false))
   }, [monthsCount, containerId])
 
@@ -170,7 +178,11 @@ export function Statistics() {
     const days = Math.max(1, Math.ceil((new Date(dateTo).getTime() - new Date(dateFrom).getTime()) / (24 * 60 * 60 * 1000)))
     statsApi.getBurningRate({ days }).then(data => {
       setBurning(data)
-    }).catch(() => setBurning(null))
+    }).catch((err) => {
+      console.error('Stats burning-rate error:', err)
+      setErrors(prev => [...prev, `Burning rate: ${err.message}`])
+      setBurning(null)
+    })
     .finally(() => setLoadingBurning(false))
   }, [dateFrom, dateTo])
 
@@ -192,6 +204,16 @@ export function Statistics() {
           Analisi dettagliata delle tue finanze per categoria, trend e burning rate
         </p>
       </div>
+
+      {/* Errors */}
+      {errors.length > 0 && (
+        <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4">
+          <p className="text-sm font-medium text-red-400 mb-1">Errori nel caricamento delle statistiche:</p>
+          {errors.map((e, i) => (
+            <p key={i} className="text-xs text-red-400/80">{e}</p>
+          ))}
+        </div>
+      )}
 
       {/* Filters */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">

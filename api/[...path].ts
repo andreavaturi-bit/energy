@@ -1325,7 +1325,8 @@ async function handleRecurrences(
       .from('transactions')
       .select('id, date, description, amount, currency, type, container_id, counterparty_id, source')
       .neq('status', 'cancelled')
-      .not('type', 'in', '("transfer_in","transfer_out")')
+      .neq('type', 'transfer_in')
+      .neq('type', 'transfer_out')
       .order('date', { ascending: true })
 
     if (dateFrom) query = query.gte('date', dateFrom)
@@ -1923,7 +1924,8 @@ async function handleStats(
       .from('transactions')
       .select('id, amount, date')
       .neq('status', 'cancelled')
-      .not('type', 'in', '("transfer_in","transfer_out")')
+      .neq('type', 'transfer_in')
+      .neq('type', 'transfer_out')
     if (dateFrom) txQuery = txQuery.gte('date', dateFrom)
     if (dateTo) txQuery = txQuery.lte('date', dateTo)
     if (containerId) txQuery = txQuery.eq('container_id', containerId)
@@ -2085,7 +2087,8 @@ async function handleStats(
       .select('amount, type')
       .gte('date', startStr)
       .eq('status', 'completed')
-      .not('type', 'in', '("transfer_in","transfer_out")')
+      .neq('type', 'transfer_in')
+      .neq('type', 'transfer_out')
 
     let totalIncome = 0
     let totalExpenses = 0
