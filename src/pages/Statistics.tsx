@@ -8,6 +8,8 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   Calendar,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react'
 import { statsApi, type TagBreakdownItem, type MonthlyTrendItem, type BurningRateStats } from '@/lib/api'
 import { useContainers } from '@/lib/hooks'
@@ -25,6 +27,11 @@ function formatMonth(ym: string): string {
   return `${monthLabels[m] || m} ${y}`
 }
 
+function formatMonthShort(ym: string): string {
+  const [y, m] = ym.split('-')
+  return `${monthLabels[m] || m} '${y.slice(2)}`
+}
+
 // ── Date presets ────────────────────────────────────────────
 
 function getPresetDates(preset: string): { from: string; to: string } {
@@ -38,7 +45,7 @@ function getPresetDates(preset: string): { from: string; to: string } {
     }
     case 'last-month': {
       const from = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-      const to = new Date(now.getFullYear(), now.getMonth(), 0) // last day of prev month
+      const to = new Date(now.getFullYear(), now.getMonth(), 0)
       return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) }
     }
     case 'this-quarter': {
@@ -76,9 +83,10 @@ function getPresetDates(preset: string): { from: string; to: string } {
     case 'all': {
       return { from: '2000-01-01', to: today }
     }
-    default: // 1y
+    default: { // 1y
       const from = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate())
       return { from: from.toISOString().slice(0, 10), to: today }
+    }
   }
 }
 
@@ -102,7 +110,7 @@ export function Statistics() {
   const { data: containers = [] } = useContainers()
   const [containerId, setContainerId] = useState('')
   const [direction, setDirection] = useState<'expense' | 'income'>('expense')
-  const [preset, setPreset] = useState('all')
+  const [preset, setPreset] = useState('1y')
 
   // Date range — initialized from preset, but user can override with custom dates
   const presetDates = useMemo(() => getPresetDates(preset), [preset])
@@ -133,6 +141,7 @@ export function Statistics() {
   const [loadingTrend, setLoadingTrend] = useState(true)
   const [loadingBurning, setLoadingBurning] = useState(true)
   const [errors, setErrors] = useState<string[]>([])
+  const [trendTableExpanded, setTrendTableExpanded] = useState(false)
 
   // Fetch tag breakdown
   useEffect(() => {
@@ -194,6 +203,57 @@ export function Statistics() {
       net: acc.net + row.net,
     }), { income: 0, expenses: 0, net: 0 })
   }, [trend])
+
+  // Equity line (cumulative net over time)
+  const equityLine = useMemo(() => {
+    let cumulative = 0
+    return trend.map(row => {
+      cumulative += row.net
+      return { month: row.month, balance: Math.round(cumulative * 100) / 100 }
+    })
+  }, [trend])
+
+  // For bar chart: if too many months, aggregate into quarters
+  const chartData = useMemo(() => {
+    if (trend.length <= 18) return { data: trend, labelFn: formatMonthShort, aggregated: false }
+
+    // Aggregate into quarters
+    const quarterMap = new Map<string, { income: number; expenses: number; net: number }>()
+    for (const row of trend) {
+      const [y, m] = row.month.split('-')
+      const q = Math.ceil(parseInt(m) / 3)
+      const key = `${y}-Q${q}`
+      if (!quarterMap.has(key)) quarterMap.set(key, { income: 0, expenses: 0, net: 0 })
+      const entry = quarterMap.get(key)!
+      entry.income += row.income
+      entry.expenses += row.expenses
+      entry.net += row.net
+    }
+
+    const quarters = [...quarterMap.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, data]) => ({
+        month: key,
+        income: Math.round(data.income * 100) / 100,
+        expenses: Math.round(data.expenses * 100) / 100,
+        net: Math.round(data.net * 100) / 100,
+      }))
+
+    return { data: quarters, labelFn: (s: string) => s, aggregated: true }
+  }, [trend])
+
+  // Equity line chart dimensions
+  const equityMinMax = useMemo(() => {
+    if (equityLine.length === 0) return { min: 0, max: 0 }
+    const vals = equityLine.map(e => e.balance)
+    return { min: Math.min(...vals), max: Math.max(...vals) }
+  }, [equityLine])
+
+  // Trend table: show only last 12 rows by default, expand to see all
+  const trendTableRows = useMemo(() => {
+    if (trendTableExpanded || trend.length <= 12) return trend
+    return trend.slice(-12)
+  }, [trend, trendTableExpanded])
 
   return (
     <div className="space-y-6">
@@ -340,11 +400,14 @@ export function Statistics() {
           )}
         </div>
 
-        {/* Monthly trend */}
+        {/* Monthly trend bar chart */}
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
           <div className="flex items-center gap-2 mb-4">
             <BarChart3 className="h-5 w-5 text-blue-400" />
             <h2 className="text-lg font-semibold text-zinc-100">Trend Mensile</h2>
+            {chartData.aggregated && (
+              <span className="text-xs text-zinc-500 ml-auto">(aggregato per trimestre)</span>
+            )}
           </div>
 
           {loadingTrend ? (
@@ -358,31 +421,42 @@ export function Statistics() {
           ) : (
             <>
               {/* Visual bar chart */}
-              <div className="flex items-end gap-1 h-48 mb-4 px-2">
-                {trend.map(row => {
-                  const maxVal = Math.max(...trend.map(t => Math.max(t.income, t.expenses)))
+              <div className="flex items-end gap-1 h-48 mb-1 px-2">
+                {chartData.data.map(row => {
+                  const maxVal = Math.max(...chartData.data.map(t => Math.max(t.income, t.expenses)))
                   const incH = maxVal > 0 ? (row.income / maxVal) * 100 : 0
                   const expH = maxVal > 0 ? (row.expenses / maxVal) * 100 : 0
                   return (
-                    <div key={row.month} className="flex-1 flex items-end gap-0.5" title={formatMonth(row.month)}>
+                    <div key={row.month} className="flex-1 flex items-end gap-0.5 min-w-[8px]" title={`${chartData.labelFn(row.month)}: +${formatCurrency(row.income)} / -${formatCurrency(row.expenses)}`}>
                       <div
-                        className="flex-1 bg-emerald-500/40 rounded-t transition-all"
+                        className="flex-1 bg-emerald-500/60 rounded-t transition-all"
                         style={{ height: `${incH}%`, minHeight: row.income > 0 ? '4px' : '0' }}
                       />
                       <div
-                        className="flex-1 bg-red-500/40 rounded-t transition-all"
+                        className="flex-1 bg-red-500/60 rounded-t transition-all"
                         style={{ height: `${expH}%`, minHeight: row.expenses > 0 ? '4px' : '0' }}
                       />
                     </div>
                   )
                 })}
               </div>
+              {/* X-axis labels — show every Nth label to avoid overlap */}
               <div className="flex gap-1 px-2 mb-4">
-                {trend.map(row => (
-                  <div key={row.month} className="flex-1 text-center text-[10px] text-zinc-500">
-                    {formatMonth(row.month).split(' ')[0]}
-                  </div>
-                ))}
+                {chartData.data.map((row, i) => {
+                  const step = chartData.data.length > 24 ? 4 : chartData.data.length > 12 ? 2 : 1
+                  const showLabel = i % step === 0 || i === chartData.data.length - 1
+                  return (
+                    <div key={row.month} className="flex-1 text-center text-[9px] text-zinc-500 truncate">
+                      {showLabel ? chartData.labelFn(row.month) : ''}
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* Legend */}
+              <div className="flex items-center gap-4 mb-4 text-xs text-zinc-400">
+                <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-emerald-500/60" /> Entrate</span>
+                <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-red-500/60" /> Uscite</span>
               </div>
 
               {/* Trend data table */}
@@ -397,22 +471,48 @@ export function Statistics() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-800/50">
-                    {trend.map(row => (
+                    {!trendTableExpanded && trend.length > 12 && (
+                      <tr>
+                        <td colSpan={4} className="py-1 text-center">
+                          <button
+                            onClick={() => setTrendTableExpanded(true)}
+                            className="text-xs text-zinc-500 hover:text-zinc-300 flex items-center gap-1 mx-auto"
+                          >
+                            <ChevronUp className="h-3 w-3" />
+                            Mostra tutti i {trend.length} mesi
+                          </button>
+                        </td>
+                      </tr>
+                    )}
+                    {trendTableRows.map(row => (
                       <tr key={row.month}>
-                        <td className="py-2 text-zinc-400">{formatMonth(row.month)}</td>
-                        <td className="py-2 text-emerald-400 text-right">
+                        <td className="py-1.5 text-zinc-400">{formatMonth(row.month)}</td>
+                        <td className="py-1.5 text-emerald-400 text-right">
                           {formatCurrency(row.income)}
                         </td>
-                        <td className="py-2 text-red-400 text-right">
+                        <td className="py-1.5 text-red-400 text-right">
                           {formatCurrency(row.expenses)}
                         </td>
-                        <td className={`py-2 text-right font-medium ${row.net >= 0 ? 'text-blue-400' : 'text-red-400'}`}>
+                        <td className={`py-1.5 text-right font-medium ${row.net >= 0 ? 'text-blue-400' : 'text-red-400'}`}>
                           {formatCurrency(row.net)}
                         </td>
                       </tr>
                     ))}
                   </tbody>
                   <tfoot>
+                    {trendTableExpanded && trend.length > 12 && (
+                      <tr>
+                        <td colSpan={4} className="py-1 text-center">
+                          <button
+                            onClick={() => setTrendTableExpanded(false)}
+                            className="text-xs text-zinc-500 hover:text-zinc-300 flex items-center gap-1 mx-auto"
+                          >
+                            <ChevronDown className="h-3 w-3" />
+                            Mostra solo ultimi 12 mesi
+                          </button>
+                        </td>
+                      </tr>
+                    )}
                     <tr className="border-t border-zinc-700">
                       <td className="py-2 text-zinc-300 font-semibold">Totale</td>
                       <td className="py-2 text-emerald-400 text-right font-semibold">
@@ -431,6 +531,137 @@ export function Statistics() {
             </>
           )}
         </div>
+      </div>
+
+      {/* Equity Line */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <TrendingUp className="h-5 w-5 text-energy-400" />
+          <h2 className="text-lg font-semibold text-zinc-100">Equity Line</h2>
+          <span className="text-xs text-zinc-500 ml-auto">Bilancio cumulativo nel periodo</span>
+        </div>
+
+        {loadingTrend ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-6 w-6 animate-spin text-energy-400" />
+          </div>
+        ) : equityLine.length === 0 ? (
+          <div className="flex items-center justify-center py-12 text-center">
+            <p className="text-sm text-zinc-500">Nessun dato per il periodo selezionato</p>
+          </div>
+        ) : (
+          <div className="relative">
+            {/* SVG equity chart */}
+            <div className="w-full h-56">
+              <svg viewBox="0 0 1000 300" className="w-full h-full" preserveAspectRatio="none">
+                {/* Zero line */}
+                {equityMinMax.min < 0 && equityMinMax.max > 0 && (() => {
+                  const range = equityMinMax.max - equityMinMax.min
+                  const zeroY = 280 - ((0 - equityMinMax.min) / range) * 260
+                  return (
+                    <line x1="0" y1={zeroY} x2="1000" y2={zeroY} stroke="#52525b" strokeWidth="1" strokeDasharray="4,4" />
+                  )
+                })()}
+
+                {/* Area fill */}
+                <path
+                  d={(() => {
+                    const range = equityMinMax.max - equityMinMax.min || 1
+                    const points = equityLine.map((pt, i) => {
+                      const x = equityLine.length === 1 ? 500 : (i / (equityLine.length - 1)) * 980 + 10
+                      const y = 280 - ((pt.balance - equityMinMax.min) / range) * 260
+                      return `${x},${y}`
+                    })
+                    const firstX = equityLine.length === 1 ? 500 : 10
+                    const lastX = equityLine.length === 1 ? 500 : 990
+                    return `M${firstX},280 L${points.join(' L')} L${lastX},280 Z`
+                  })()}
+                  fill="url(#equityGradient)"
+                  opacity="0.3"
+                />
+
+                {/* Line */}
+                <polyline
+                  points={equityLine.map((pt, i) => {
+                    const range = equityMinMax.max - equityMinMax.min || 1
+                    const x = equityLine.length === 1 ? 500 : (i / (equityLine.length - 1)) * 980 + 10
+                    const y = 280 - ((pt.balance - equityMinMax.min) / range) * 260
+                    return `${x},${y}`
+                  }).join(' ')}
+                  fill="none"
+                  stroke={equityLine[equityLine.length - 1]?.balance >= 0 ? '#22c55e' : '#ef4444'}
+                  strokeWidth="2.5"
+                  vectorEffect="non-scaling-stroke"
+                />
+
+                {/* Dots on start and end */}
+                {equityLine.length > 0 && (() => {
+                  const range = equityMinMax.max - equityMinMax.min || 1
+                  const first = equityLine[0]
+                  const last = equityLine[equityLine.length - 1]
+                  const fx = equityLine.length === 1 ? 500 : 10
+                  const fy = 280 - ((first.balance - equityMinMax.min) / range) * 260
+                  const lx = equityLine.length === 1 ? 500 : 990
+                  const ly = 280 - ((last.balance - equityMinMax.min) / range) * 260
+                  const color = last.balance >= 0 ? '#22c55e' : '#ef4444'
+                  return (
+                    <>
+                      <circle cx={fx} cy={fy} r="4" fill={color} vectorEffect="non-scaling-stroke" />
+                      <circle cx={lx} cy={ly} r="4" fill={color} vectorEffect="non-scaling-stroke" />
+                    </>
+                  )
+                })()}
+
+                <defs>
+                  <linearGradient id="equityGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={equityLine[equityLine.length - 1]?.balance >= 0 ? '#22c55e' : '#ef4444'} />
+                    <stop offset="100%" stopColor="transparent" />
+                  </linearGradient>
+                </defs>
+              </svg>
+            </div>
+
+            {/* Y-axis labels */}
+            <div className="absolute top-0 left-0 h-56 flex flex-col justify-between pointer-events-none py-2">
+              <span className="text-[10px] text-zinc-500 bg-zinc-900/80 px-1 rounded">{formatCurrency(equityMinMax.max)}</span>
+              {equityMinMax.min < 0 && equityMinMax.max > 0 && (
+                <span className="text-[10px] text-zinc-500 bg-zinc-900/80 px-1 rounded">€0</span>
+              )}
+              <span className="text-[10px] text-zinc-500 bg-zinc-900/80 px-1 rounded">{formatCurrency(equityMinMax.min)}</span>
+            </div>
+
+            {/* X-axis labels */}
+            <div className="flex justify-between px-2 mt-1">
+              <span className="text-[10px] text-zinc-500">{formatMonthShort(equityLine[0].month)}</span>
+              {equityLine.length > 2 && (
+                <span className="text-[10px] text-zinc-500">{formatMonthShort(equityLine[Math.floor(equityLine.length / 2)].month)}</span>
+              )}
+              <span className="text-[10px] text-zinc-500">{formatMonthShort(equityLine[equityLine.length - 1].month)}</span>
+            </div>
+
+            {/* Summary stats */}
+            <div className="flex gap-6 mt-3 text-sm">
+              <div>
+                <span className="text-zinc-500 text-xs">Inizio periodo:</span>
+                <span className={`ml-2 font-medium ${equityLine[0].balance >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {formatCurrency(equityLine[0].balance)}
+                </span>
+              </div>
+              <div>
+                <span className="text-zinc-500 text-xs">Fine periodo:</span>
+                <span className={`ml-2 font-medium ${equityLine[equityLine.length - 1].balance >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {formatCurrency(equityLine[equityLine.length - 1].balance)}
+                </span>
+              </div>
+              <div>
+                <span className="text-zinc-500 text-xs">Variazione:</span>
+                <span className={`ml-2 font-medium ${equityLine[equityLine.length - 1].balance - equityLine[0].balance >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {formatCurrency(equityLine[equityLine.length - 1].balance - equityLine[0].balance)}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Burning rate */}
