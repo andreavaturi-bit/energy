@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
   TrendingUp,
   PieChart,
@@ -7,9 +7,11 @@ import {
   Loader2,
   ArrowUpRight,
   ArrowDownRight,
+  Calendar,
 } from 'lucide-react'
 import { statsApi, type TagBreakdownItem, type MonthlyTrendItem, type BurningRateStats } from '@/lib/api'
 import { useContainers } from '@/lib/hooks'
+import { SearchableSelect } from '@/components/ui/SearchableSelect'
 import { formatCurrency } from '@/lib/utils'
 
 const monthLabels: Record<string, string> = {
@@ -23,25 +25,113 @@ function formatMonth(ym: string): string {
   return `${monthLabels[m] || m} ${y}`
 }
 
+// ── Date presets ────────────────────────────────────────────
+
+function getPresetDates(preset: string): { from: string; to: string } {
+  const now = new Date()
+  const today = now.toISOString().slice(0, 10)
+
+  switch (preset) {
+    case 'this-month': {
+      const from = new Date(now.getFullYear(), now.getMonth(), 1)
+      return { from: from.toISOString().slice(0, 10), to: today }
+    }
+    case 'last-month': {
+      const from = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+      const to = new Date(now.getFullYear(), now.getMonth(), 0) // last day of prev month
+      return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) }
+    }
+    case 'this-quarter': {
+      const q = Math.floor(now.getMonth() / 3) * 3
+      const from = new Date(now.getFullYear(), q, 1)
+      return { from: from.toISOString().slice(0, 10), to: today }
+    }
+    case 'last-quarter': {
+      const q = Math.floor(now.getMonth() / 3) * 3
+      const from = new Date(now.getFullYear(), q - 3, 1)
+      const to = new Date(now.getFullYear(), q, 0)
+      return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) }
+    }
+    case '3m': {
+      const from = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate())
+      return { from: from.toISOString().slice(0, 10), to: today }
+    }
+    case '6m': {
+      const from = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate())
+      return { from: from.toISOString().slice(0, 10), to: today }
+    }
+    case 'this-year': {
+      const from = new Date(now.getFullYear(), 0, 1)
+      return { from: from.toISOString().slice(0, 10), to: today }
+    }
+    case 'last-year': {
+      const from = new Date(now.getFullYear() - 1, 0, 1)
+      const to = new Date(now.getFullYear() - 1, 11, 31)
+      return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) }
+    }
+    case '2y': {
+      const from = new Date(now.getFullYear() - 2, now.getMonth(), now.getDate())
+      return { from: from.toISOString().slice(0, 10), to: today }
+    }
+    case 'all': {
+      return { from: '2000-01-01', to: today }
+    }
+    default: // 1y
+      const from = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate())
+      return { from: from.toISOString().slice(0, 10), to: today }
+  }
+}
+
+const presets = [
+  { value: 'this-month', label: 'Mese corrente' },
+  { value: 'last-month', label: 'Mese scorso' },
+  { value: 'this-quarter', label: 'Trimestre corrente' },
+  { value: 'last-quarter', label: 'Trimestre scorso' },
+  { value: '3m', label: 'Ultimi 3 mesi' },
+  { value: '6m', label: 'Ultimi 6 mesi' },
+  { value: 'this-year', label: 'Anno corrente' },
+  { value: 'last-year', label: 'Anno scorso' },
+  { value: '1y', label: 'Ultimo anno' },
+  { value: '2y', label: 'Ultimi 2 anni' },
+  { value: 'all', label: 'Tutto lo storico' },
+]
+
+// ── Component ───────────────────────────────────────────────
+
 export function Statistics() {
   const { data: containers = [] } = useContainers()
   const [containerId, setContainerId] = useState('')
-  const [months, setMonths] = useState(6)
   const [direction, setDirection] = useState<'expense' | 'income'>('expense')
+  const [preset, setPreset] = useState('all')
+
+  // Date range — initialized from preset, but user can override with custom dates
+  const presetDates = useMemo(() => getPresetDates(preset), [preset])
+  const [dateFrom, setDateFrom] = useState(presetDates.from)
+  const [dateTo, setDateTo] = useState(presetDates.to)
+
+  // Sync dates when preset changes
+  useEffect(() => {
+    const d = getPresetDates(preset)
+    setDateFrom(d.from)
+    setDateTo(d.to)
+  }, [preset])
+
+  // Compute months count for trend endpoint
+  const monthsCount = useMemo(() => {
+    const from = new Date(dateFrom)
+    const to = new Date(dateTo)
+    return Math.max(1, Math.ceil((to.getTime() - from.getTime()) / (30.44 * 24 * 60 * 60 * 1000)))
+  }, [dateFrom, dateTo])
 
   // Stats state
   const [breakdown, setBreakdown] = useState<TagBreakdownItem[]>([])
   const [grandTotal, setGrandTotal] = useState(0)
+  const [txCount, setTxCount] = useState(0)
   const [trend, setTrend] = useState<MonthlyTrendItem[]>([])
   const [burning, setBurning] = useState<BurningRateStats | null>(null)
   const [loadingBreakdown, setLoadingBreakdown] = useState(true)
   const [loadingTrend, setLoadingTrend] = useState(true)
   const [loadingBurning, setLoadingBurning] = useState(true)
-
-  // Compute date range from months
-  const now = new Date()
-  const dateFrom = new Date(now.getFullYear(), now.getMonth() - months + 1, 1).toISOString().slice(0, 10)
-  const dateTo = now.toISOString().slice(0, 10)
 
   // Fetch tag breakdown
   useEffect(() => {
@@ -51,13 +141,14 @@ export function Statistics() {
       dateTo,
       containerId: containerId || undefined,
       direction,
-      tagType: 'category',
     }).then(data => {
       setBreakdown(data.breakdown || [])
       setGrandTotal(data.grandTotal || 0)
+      setTxCount(data.transactionCount || 0)
     }).catch(() => {
       setBreakdown([])
       setGrandTotal(0)
+      setTxCount(0)
     }).finally(() => setLoadingBreakdown(false))
   }, [dateFrom, dateTo, containerId, direction])
 
@@ -65,22 +156,32 @@ export function Statistics() {
   useEffect(() => {
     setLoadingTrend(true)
     statsApi.getMonthlyTrend({
-      months,
+      months: monthsCount,
       containerId: containerId || undefined,
     }).then(data => {
       setTrend(data.trend || [])
     }).catch(() => setTrend([]))
     .finally(() => setLoadingTrend(false))
-  }, [months, containerId])
+  }, [monthsCount, containerId])
 
   // Fetch burning rate
   useEffect(() => {
     setLoadingBurning(true)
-    statsApi.getBurningRate({ days: months * 30 }).then(data => {
+    const days = Math.max(1, Math.ceil((new Date(dateTo).getTime() - new Date(dateFrom).getTime()) / (24 * 60 * 60 * 1000)))
+    statsApi.getBurningRate({ days }).then(data => {
       setBurning(data)
     }).catch(() => setBurning(null))
     .finally(() => setLoadingBurning(false))
-  }, [months])
+  }, [dateFrom, dateTo])
+
+  // Trend totals
+  const trendTotals = useMemo(() => {
+    return trend.reduce((acc, row) => ({
+      income: acc.income + row.income,
+      expenses: acc.expenses + row.expenses,
+      net: acc.net + row.net,
+    }), { income: 0, expenses: 0, net: 0 })
+  }, [trend])
 
   return (
     <div className="space-y-6">
@@ -95,29 +196,43 @@ export function Statistics() {
       {/* Filters */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
         <div className="flex flex-wrap items-center gap-3">
-          {/* Period */}
-          <select
-            value={months}
-            onChange={e => setMonths(parseInt(e.target.value))}
-            className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-300 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500"
-          >
-            <option value={3}>Ultimi 3 mesi</option>
-            <option value={6}>Ultimi 6 mesi</option>
-            <option value={12}>Ultimo anno</option>
-            <option value={24}>Ultimi 2 anni</option>
-          </select>
+          {/* Preset selector */}
+          <SearchableSelect
+            value={preset}
+            onChange={setPreset}
+            options={presets}
+            placeholder="Periodo..."
+            className="min-w-[170px]"
+          />
+
+          {/* Custom date range */}
+          <div className="flex items-center gap-1.5">
+            <Calendar className="h-4 w-4 text-zinc-500" />
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={e => { setDateFrom(e.target.value); setPreset('') }}
+              className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-300 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500 [color-scheme:dark]"
+            />
+            <span className="text-xs text-zinc-500">—</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={e => { setDateTo(e.target.value); setPreset('') }}
+              className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-300 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500 [color-scheme:dark]"
+            />
+          </div>
 
           {/* Container */}
-          <select
+          <SearchableSelect
             value={containerId}
-            onChange={e => setContainerId(e.target.value)}
-            className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-300 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500"
-          >
-            <option value="">Tutti i contenitori</option>
-            {containers.filter(c => c.isActive).map(c => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
+            onChange={setContainerId}
+            options={containers.filter(c => c.isActive).map(c => ({ value: c.id, label: c.name, color: c.color }))}
+            placeholder="Contenitore"
+            allowEmpty
+            emptyLabel="Tutti i contenitori"
+            className="min-w-[160px]"
+          />
 
           {/* Direction for breakdown */}
           <div className="flex rounded-lg border border-zinc-700 overflow-hidden">
@@ -146,11 +261,11 @@ export function Statistics() {
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <PieChart className="h-5 w-5 text-purple-400" />
-              <h2 className="text-lg font-semibold text-zinc-100">Ripartizione per Categoria</h2>
+              <h2 className="text-lg font-semibold text-zinc-100">Ripartizione per Tag</h2>
             </div>
             {!loadingBreakdown && (
               <span className="text-sm text-zinc-500">
-                Totale: {formatCurrency(grandTotal)}
+                Totale: {formatCurrency(grandTotal)} ({txCount} tx)
               </span>
             )}
           </div>
@@ -275,6 +390,20 @@ export function Statistics() {
                       </tr>
                     ))}
                   </tbody>
+                  <tfoot>
+                    <tr className="border-t border-zinc-700">
+                      <td className="py-2 text-zinc-300 font-semibold">Totale</td>
+                      <td className="py-2 text-emerald-400 text-right font-semibold">
+                        {formatCurrency(trendTotals.income)}
+                      </td>
+                      <td className="py-2 text-red-400 text-right font-semibold">
+                        {formatCurrency(trendTotals.expenses)}
+                      </td>
+                      <td className={`py-2 text-right font-bold ${trendTotals.net >= 0 ? 'text-blue-400' : 'text-red-400'}`}>
+                        {formatCurrency(trendTotals.net)}
+                      </td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
             </>
@@ -327,25 +456,6 @@ export function Statistics() {
         ) : (
           <p className="text-sm text-zinc-500 text-center py-8">Dati non disponibili</p>
         )}
-      </div>
-
-      {/* Equity Line placeholder - keeping for future chart library */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-        <div className="flex items-center gap-2 mb-4">
-          <TrendingUp className="h-5 w-5 text-energy-400" />
-          <h2 className="text-lg font-semibold text-zinc-100">Equity Line</h2>
-        </div>
-        <div className="flex items-center justify-center rounded-xl border border-dashed border-zinc-700 bg-zinc-800/30 h-48">
-          <div className="text-center">
-            <TrendingUp className="h-10 w-10 text-zinc-600 mx-auto mb-2" />
-            <p className="text-sm text-zinc-500">
-              Grafico equity line — andamento patrimonio netto nel tempo
-            </p>
-            <p className="text-xs text-zinc-600 mt-1">
-              Prossima implementazione con libreria grafici
-            </p>
-          </div>
-        </div>
       </div>
     </div>
   )

@@ -1916,22 +1916,14 @@ async function handleStats(
     const dateFrom = param('dateFrom')
     const dateTo = param('dateTo')
     const containerId = param('containerId')
-    const tagType = param('tagType') || 'category'
     const direction = param('direction') || 'expense' // expense or income
-
-    // Get all tags of this type
-    const { data: allTags } = await sb
-      .from('tags')
-      .select('id, name, color, type, parent_id')
-      .eq('type', tagType)
-      .eq('is_active', true)
-      .order('name')
 
     // Build transaction query
     let txQuery = sb
       .from('transactions')
       .select('id, amount, date')
       .neq('status', 'cancelled')
+      .not('type', 'in', '("transfer_in","transfer_out")')
     if (dateFrom) txQuery = txQuery.gte('date', dateFrom)
     if (dateTo) txQuery = txQuery.lte('date', dateTo)
     if (containerId) txQuery = txQuery.eq('container_id', containerId)
@@ -1986,19 +1978,35 @@ async function handleStats(
 
     const grandTotal = [...tagTotals.values()].reduce((s, e) => s + e.total, 0) + untaggedTotal
 
-    // Build result
-    const breakdown = (allTags || []).map((tag: Record<string, unknown>) => {
-      const entry = tagTotals.get(tag.id as string)
-      return {
-        tagId: tag.id,
-        tagName: tag.name,
-        tagColor: tag.color,
-        total: entry?.total ?? 0,
-        count: entry?.count ?? 0,
-        percentage: grandTotal > 0 ? ((entry?.total ?? 0) / grandTotal) * 100 : 0,
+    // Fetch tag details for all found tags
+    const tagIds = [...tagTotals.keys()]
+    let tagInfoMap = new Map<string, { name: string; color: string }>()
+    if (tagIds.length > 0) {
+      const { data: tagRows } = await sb
+        .from('tags')
+        .select('id, name, color')
+        .in('id', tagIds)
+      for (const t of tagRows || []) {
+        tagInfoMap.set(t.id as string, { name: t.name as string, color: t.color as string })
       }
-    }).filter((b: { total: number }) => b.total > 0)
-    .sort((a: { total: number }, b: { total: number }) => b.total - a.total)
+    }
+
+    // Build result from actual tag usage
+    const breakdown = tagIds
+      .map((tagId) => {
+        const entry = tagTotals.get(tagId)!
+        const info = tagInfoMap.get(tagId) || { name: 'Sconosciuto', color: '#6b7280' }
+        return {
+          tagId,
+          tagName: info.name,
+          tagColor: info.color,
+          total: entry.total,
+          count: entry.count,
+          percentage: grandTotal > 0 ? (entry.total / grandTotal) * 100 : 0,
+        }
+      })
+      .filter((b) => b.total > 0)
+      .sort((a, b) => b.total - a.total)
 
     if (untaggedCount > 0) {
       breakdown.push({
