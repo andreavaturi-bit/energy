@@ -420,43 +420,99 @@ export function Statistics() {
             </div>
           ) : (
             <>
-              {/* Visual bar chart */}
-              <div className="flex items-end gap-1 h-48 mb-1 px-2">
-                {chartData.data.map(row => {
-                  const maxVal = Math.max(...chartData.data.map(t => Math.max(t.income, t.expenses)))
-                  const incH = maxVal > 0 ? (row.income / maxVal) * 100 : 0
-                  const expH = maxVal > 0 ? (row.expenses / maxVal) * 100 : 0
-                  return (
-                    <div key={row.month} className="flex-1 flex items-end gap-0.5 min-w-[8px]" title={`${chartData.labelFn(row.month)}: +${formatCurrency(row.income)} / -${formatCurrency(row.expenses)}`}>
-                      <div
-                        className="flex-1 bg-emerald-500/60 rounded-t transition-all"
-                        style={{ height: `${incH}%`, minHeight: row.income > 0 ? '4px' : '0' }}
-                      />
-                      <div
-                        className="flex-1 bg-red-500/60 rounded-t transition-all"
-                        style={{ height: `${expH}%`, minHeight: row.expenses > 0 ? '4px' : '0' }}
-                      />
-                    </div>
-                  )
-                })}
-              </div>
-              {/* X-axis labels — show every Nth label to avoid overlap */}
-              <div className="flex gap-1 px-2 mb-4">
-                {chartData.data.map((row, i) => {
-                  const step = chartData.data.length > 24 ? 4 : chartData.data.length > 12 ? 2 : 1
-                  const showLabel = i % step === 0 || i === chartData.data.length - 1
-                  return (
-                    <div key={row.month} className="flex-1 text-center text-[9px] text-zinc-500 truncate">
-                      {showLabel ? chartData.labelFn(row.month) : ''}
-                    </div>
-                  )
-                })}
-              </div>
+              {/* SVG bar chart */}
+              {(() => {
+                const d = chartData.data
+                const n = d.length
+                const svgW = 600
+                const svgH = 200
+                const padL = 10, padR = 10, padT = 10, padB = 24
+                const chartW = svgW - padL - padR
+                const chartH = svgH - padT - padB
+                const groupW = chartW / n
+                const barW = Math.min(groupW * 0.35, 30)
+                const gap = Math.max(barW * 0.15, 1)
+                const maxVal = Math.max(...d.map(t => Math.max(t.income, t.expenses)), 1)
+
+                const labelStep = n > 24 ? 4 : n > 12 ? 2 : 1
+
+                return (
+                  <div className="w-full mb-4">
+                    <svg viewBox={`0 0 ${svgW} ${svgH}`} className="w-full" style={{ height: '200px' }}>
+                      {/* Horizontal grid lines */}
+                      {[0.25, 0.5, 0.75, 1].map(frac => (
+                        <line
+                          key={frac}
+                          x1={padL} y1={padT + chartH * (1 - frac)}
+                          x2={svgW - padR} y2={padT + chartH * (1 - frac)}
+                          stroke="#27272a" strokeWidth="0.5"
+                        />
+                      ))}
+
+                      {/* Bars */}
+                      {d.map((row, i) => {
+                        const cx = padL + groupW * i + groupW / 2
+                        const incH = (row.income / maxVal) * chartH
+                        const expH = (row.expenses / maxVal) * chartH
+                        return (
+                          <g key={row.month}>
+                            <title>{`${chartData.labelFn(row.month)}: +${formatCurrency(row.income)} / -${formatCurrency(row.expenses)}`}</title>
+                            {/* Income bar */}
+                            {row.income > 0 && (
+                              <rect
+                                x={cx - barW - gap / 2}
+                                y={padT + chartH - incH}
+                                width={barW}
+                                height={Math.max(incH, 2)}
+                                rx={Math.min(barW / 4, 3)}
+                                fill="#34d399"
+                                opacity="0.7"
+                              />
+                            )}
+                            {/* Expense bar */}
+                            {row.expenses > 0 && (
+                              <rect
+                                x={cx + gap / 2}
+                                y={padT + chartH - expH}
+                                width={barW}
+                                height={Math.max(expH, 2)}
+                                rx={Math.min(barW / 4, 3)}
+                                fill="#f87171"
+                                opacity="0.7"
+                              />
+                            )}
+                          </g>
+                        )
+                      })}
+
+                      {/* X-axis labels */}
+                      {d.map((row, i) => {
+                        if (i % labelStep !== 0 && i !== n - 1) return null
+                        const cx = padL + groupW * i + groupW / 2
+                        return (
+                          <text
+                            key={`lbl-${row.month}`}
+                            x={cx} y={svgH - 4}
+                            textAnchor="middle"
+                            fontSize="9"
+                            fill="#71717a"
+                          >
+                            {chartData.labelFn(row.month)}
+                          </text>
+                        )
+                      })}
+
+                      {/* Baseline */}
+                      <line x1={padL} y1={padT + chartH} x2={svgW - padR} y2={padT + chartH} stroke="#3f3f46" strokeWidth="1" />
+                    </svg>
+                  </div>
+                )
+              })()}
 
               {/* Legend */}
               <div className="flex items-center gap-4 mb-4 text-xs text-zinc-400">
-                <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-emerald-500/60" /> Entrate</span>
-                <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-red-500/60" /> Uscite</span>
+                <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-emerald-400/70" /> Entrate</span>
+                <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-red-400/70" /> Uscite</span>
               </div>
 
               {/* Trend data table */}
