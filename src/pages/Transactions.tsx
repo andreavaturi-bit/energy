@@ -1,4 +1,5 @@
-import { useMemo, useState, useCallback } from 'react'
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   useReactTable,
   getCoreRowModel,
@@ -24,16 +25,23 @@ import {
   Loader2,
   AlertCircle,
 } from 'lucide-react'
-import type { Transaction, TransactionType, TransactionStatus, Container, Counterparty, Subject } from '@/types'
+import { SearchableSelect, SearchableMultiSelect } from '@/components/ui/SearchableSelect'
+import type { Transaction, TransactionType, TransactionStatus, Container, Counterparty, Subject, Tag } from '@/types'
 import {
   useTransactions,
   useContainers,
   useCounterparties,
   useSubjects,
+  useTags,
   useCreateTransaction,
   useUpdateTransaction,
   useDeleteTransaction,
+  useCreateCounterparty,
+  useCreateSubject,
+  useCreateTag,
 } from '@/lib/hooks'
+import { transactionsApi } from '@/lib/api'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   formatCurrency,
   formatDate,
@@ -75,7 +83,20 @@ function truncate(str: string | null | undefined, max: number): string {
 
 // ── Available filter options ────────────────────────────────
 
-const typeOptions: { value: TransactionType; label: string }[] = [
+/** Options for the create/edit form (merged transfer) */
+const typeOptions: { value: string; label: string }[] = [
+  { value: 'income', label: 'Entrata' },
+  { value: 'expense', label: 'Uscita' },
+  { value: 'transfer', label: 'Trasferimento' },
+  { value: 'capital_injection', label: 'Versamento c/capitale' },
+  { value: 'loan_out', label: 'Prestito dato' },
+  { value: 'loan_in', label: 'Prestito ricevuto' },
+  { value: 'repayment_out', label: 'Rimborso dato' },
+  { value: 'repayment_in', label: 'Rimborso ricevuto' },
+]
+
+/** Options for the filter bar (actual DB types) */
+const filterTypeOptions: { value: TransactionType; label: string }[] = [
   { value: 'income', label: 'Entrata' },
   { value: 'expense', label: 'Uscita' },
   { value: 'transfer_out', label: 'Trasferimento (uscita)' },
@@ -100,22 +121,46 @@ function TransactionModal({
   onClose,
   onSave,
   existing,
+  linkedTransaction,
   containers,
   counterparties,
   subjects,
+  tags,
   isSaving,
   saveError,
+  onCreateCounterparty,
+  onCreateSubject,
+  onCreateTag,
 }: {
   onClose: () => void
   onSave: (data: Record<string, unknown>) => void
   existing?: Transaction | null
+  linkedTransaction?: Transaction | null
   containers: Container[]
   counterparties: Counterparty[]
   subjects: Subject[]
+  tags: Tag[]
   isSaving?: boolean
   saveError?: string | null
+  onCreateCounterparty?: (name: string) => void
+  onCreateSubject?: (name: string) => void
+  onCreateTag?: (name: string) => void
 }) {
   const isEdit = !!existing
+  const isExistingTransfer = existing && (existing.type === 'transfer_out' || existing.type === 'transfer_in')
+
+  // For transfers, figure out initial from/to containers
+  let initialFromContainerId = ''
+  let initialToContainerId = ''
+  if (isExistingTransfer) {
+    if (existing.type === 'transfer_out') {
+      initialFromContainerId = existing.containerId
+      initialToContainerId = linkedTransaction?.containerId ?? ''
+    } else {
+      initialFromContainerId = linkedTransaction?.containerId ?? ''
+      initialToContainerId = existing.containerId
+    }
+  }
 
   const [form, setForm] = useState({
     date: existing?.date ?? new Date().toISOString().slice(0, 10),
@@ -123,37 +168,67 @@ function TransactionModal({
     amount: existing ? String(Math.abs(parseFloat(existing.amount))) : '',
     currency: existing?.currency ?? 'EUR',
     containerId: existing?.containerId ?? (containers[0]?.id ?? ''),
+    fromContainerId: initialFromContainerId || (containers[0]?.id ?? ''),
+    toContainerId: initialToContainerId,
     counterpartyId: existing?.counterpartyId ?? '',
-    type: (existing?.type ?? 'expense') as TransactionType,
+    type: isExistingTransfer ? 'transfer' : (existing?.type ?? 'expense'),
     status: (existing?.status ?? 'completed') as TransactionStatus,
     notes: existing?.notes ?? '',
     sharedWithSubjectId: existing?.sharedWithSubjectId ?? '',
     sharePercentage: existing?.sharePercentage ?? '',
+    tagIds: (existing?.tags || []).map(t => t.id),
   })
 
+  const isTransfer = form.type === 'transfer'
+
   function handleSave() {
-    if (!form.amount || !form.containerId) return
+    if (!form.amount) return
 
-    const isOut = ['expense', 'transfer_out', 'capital_injection', 'loan_out', 'repayment_out'].includes(form.type)
-    const rawAmt = parseFloat(form.amount)
-    const finalAmt = isOut && rawAmt > 0 ? -rawAmt : rawAmt
+    if (isTransfer) {
+      if (!form.fromContainerId || !form.toContainerId) return
+      if (form.fromContainerId === form.toContainerId) return
 
-    const data: Record<string, unknown> = {
-      date: form.date,
-      description: form.description || null,
-      amount: finalAmt.toFixed(2),
-      currency: form.currency,
-      containerId: form.containerId,
-      counterpartyId: form.counterpartyId || null,
-      type: form.type,
-      status: form.status,
-      source: existing?.source ?? 'manual',
-      notes: form.notes || null,
-      sharedWithSubjectId: form.sharedWithSubjectId || null,
-      sharePercentage: form.sharePercentage || null,
+      const rawAmt = parseFloat(form.amount)
+      onSave({
+        _isTransfer: true,
+        date: form.date,
+        description: form.description || null,
+        amount: Math.abs(rawAmt).toFixed(2),
+        currency: form.currency,
+        fromContainerId: form.fromContainerId,
+        toContainerId: form.toContainerId,
+        status: form.status,
+        source: existing?.source ?? 'manual',
+        notes: form.notes || null,
+      })
+    } else {
+      if (!form.containerId) return
+
+      const isOut = ['expense', 'capital_injection', 'loan_out', 'repayment_out'].includes(form.type)
+      const rawAmt = parseFloat(form.amount)
+      const finalAmt = isOut && rawAmt > 0 ? -rawAmt : rawAmt
+
+      onSave({
+        date: form.date,
+        description: form.description || null,
+        amount: finalAmt.toFixed(2),
+        currency: form.currency,
+        containerId: form.containerId,
+        counterpartyId: form.counterpartyId || null,
+        type: form.type,
+        status: form.status,
+        source: existing?.source ?? 'manual',
+        notes: form.notes || null,
+        sharedWithSubjectId: form.sharedWithSubjectId || null,
+        sharePercentage: form.sharePercentage || null,
+        tagIds: form.tagIds,
+      })
     }
-    onSave(data)
   }
+
+  const canSave = isTransfer
+    ? !!(form.amount && form.fromContainerId && form.toContainerId && form.fromContainerId !== form.toContainerId)
+    : !!(form.amount && form.containerId)
 
   const inputCls = 'w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500'
   const labelCls = 'block text-xs font-medium text-zinc-400 mb-1'
@@ -177,15 +252,18 @@ function TransactionModal({
             </div>
             <div>
               <label className={labelCls}>Tipo *</label>
-              <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as TransactionType })} className={inputCls}>
-                {typeOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
+              <SearchableSelect
+                value={form.type}
+                onChange={(v) => setForm({ ...form, type: v })}
+                options={typeOptions.map((o) => ({ value: o.value, label: o.label }))}
+                placeholder="Tipo..."
+              />
             </div>
           </div>
 
           {/* Description */}
           <div>
-            <label className={labelCls}>Descrizione *</label>
+            <label className={labelCls}>Descrizione</label>
             <input type="text" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Descrizione della transazione..." className={inputCls} />
           </div>
 
@@ -197,61 +275,126 @@ function TransactionModal({
             </div>
             <div>
               <label className={labelCls}>Valuta</label>
-              <select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })} className={inputCls}>
-                <option value="EUR">EUR</option>
-                <option value="USD">USD</option>
-                <option value="GBP">GBP</option>
-                <option value="RON">RON</option>
-              </select>
+              <SearchableSelect
+                value={form.currency}
+                onChange={(v) => setForm({ ...form, currency: v })}
+                options={[
+                  { value: 'EUR', label: 'EUR' },
+                  { value: 'USD', label: 'USD' },
+                  { value: 'GBP', label: 'GBP' },
+                  { value: 'RON', label: 'RON' },
+                ]}
+                placeholder="Valuta"
+              />
             </div>
           </div>
 
-          {/* Container */}
-          <div>
-            <label className={labelCls}>Contenitore *</label>
-            <select value={form.containerId} onChange={(e) => setForm({ ...form, containerId: e.target.value })} className={inputCls}>
-              {containers.filter((c) => c.isActive).map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-          </div>
+          {/* Container(s) — different layout for transfers */}
+          {isTransfer ? (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelCls}>Conto di uscita *</label>
+                <SearchableSelect
+                  value={form.fromContainerId}
+                  onChange={(v) => setForm({ ...form, fromContainerId: v })}
+                  options={containers.filter((c) => c.isActive).map((c) => ({ value: c.id, label: c.name, color: c.color }))}
+                  placeholder="Seleziona..."
+                  allowEmpty
+                  emptyLabel="— Seleziona —"
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Conto di entrata *</label>
+                <SearchableSelect
+                  value={form.toContainerId}
+                  onChange={(v) => setForm({ ...form, toContainerId: v })}
+                  options={containers.filter((c) => c.isActive).map((c) => ({ value: c.id, label: c.name, color: c.color }))}
+                  placeholder="Seleziona..."
+                  allowEmpty
+                  emptyLabel="— Seleziona —"
+                />
+              </div>
+              {form.fromContainerId && form.toContainerId && form.fromContainerId === form.toContainerId && (
+                <p className="col-span-2 text-xs text-amber-400">I due conti devono essere diversi</p>
+              )}
+            </div>
+          ) : (
+            <>
+              {/* Container */}
+              <div>
+                <label className={labelCls}>Contenitore *</label>
+                <SearchableSelect
+                  value={form.containerId}
+                  onChange={(v) => setForm({ ...form, containerId: v })}
+                  options={containers.filter((c) => c.isActive).map((c) => ({ value: c.id, label: c.name, color: c.color }))}
+                  placeholder="Contenitore..."
+                />
+              </div>
 
-          {/* Counterparty */}
-          <div>
-            <label className={labelCls}>Controparte</label>
-            <select value={form.counterpartyId} onChange={(e) => setForm({ ...form, counterpartyId: e.target.value })} className={inputCls}>
-              <option value="">— Nessuna —</option>
-              {counterparties.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-          </div>
+              {/* Counterparty */}
+              <div>
+                <label className={labelCls}>Controparte</label>
+                <SearchableSelect
+                  value={form.counterpartyId}
+                  onChange={(v) => setForm({ ...form, counterpartyId: v })}
+                  options={counterparties.map((c) => ({ value: c.id, label: c.name }))}
+                  placeholder="Controparte..."
+                  allowEmpty
+                  emptyLabel="— Nessuna —"
+                  onCreateNew={onCreateCounterparty}
+                  createLabel="Crea controparte"
+                />
+              </div>
+            </>
+          )}
 
           {/* Status */}
           <div>
             <label className={labelCls}>Stato</label>
-            <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as TransactionStatus })} className={inputCls}>
-              {statusOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
+            <SearchableSelect
+              value={form.status}
+              onChange={(v) => setForm({ ...form, status: v as TransactionStatus })}
+              options={statusOptions.map((o) => ({ value: o.value, label: o.label }))}
+              placeholder="Stato..."
+            />
           </div>
 
-          {/* Cost sharing */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls}>Condiviso con</label>
-              <select value={form.sharedWithSubjectId} onChange={(e) => setForm({ ...form, sharedWithSubjectId: e.target.value })} className={inputCls}>
-                <option value="">— Nessuno —</option>
-                {subjects.filter((s) => s.role === 'partner').map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-            </div>
-            {form.sharedWithSubjectId && (
+          {/* Cost sharing — only for non-transfers */}
+          {!isTransfer && (
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className={labelCls}>Quota %</label>
-                <input type="number" min="1" max="100" value={form.sharePercentage} onChange={(e) => setForm({ ...form, sharePercentage: e.target.value })} placeholder="50" className={inputCls} />
+                <label className={labelCls}>Condiviso con</label>
+                <SearchableSelect
+                  value={form.sharedWithSubjectId}
+                  onChange={(v) => setForm({ ...form, sharedWithSubjectId: v })}
+                  options={subjects.filter((s) => s.role === 'partner').map((s) => ({ value: s.id, label: s.name }))}
+                  placeholder="Soggetto..."
+                  allowEmpty
+                  emptyLabel="— Nessuno —"
+                  onCreateNew={onCreateSubject}
+                  createLabel="Crea soggetto"
+                />
               </div>
-            )}
+              {form.sharedWithSubjectId && (
+                <div>
+                  <label className={labelCls}>Quota %</label>
+                  <input type="number" min="1" max="100" value={form.sharePercentage} onChange={(e) => setForm({ ...form, sharePercentage: e.target.value })} placeholder="50" className={inputCls} />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Tags */}
+          <div>
+            <label className={labelCls}>Tag</label>
+            <SearchableMultiSelect
+              value={form.tagIds}
+              onChange={(ids) => setForm({ ...form, tagIds: ids })}
+              options={tags.filter(t => t.isActive).map(t => ({ value: t.id, label: t.name, color: t.color }))}
+              placeholder="Seleziona tag..."
+              onCreateNew={onCreateTag}
+              createLabel="Crea tag"
+            />
           </div>
 
           {/* Notes */}
@@ -274,11 +417,11 @@ function TransactionModal({
             </button>
             <button
               onClick={handleSave}
-              disabled={!form.amount || !form.containerId || isSaving}
+              disabled={!canSave || isSaving}
               className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
-              {isEdit ? 'Salva Modifiche' : 'Salva Transazione'}
+              {isEdit ? 'Salva Modifiche' : (isTransfer ? 'Salva Trasferimento' : 'Salva Transazione')}
             </button>
           </div>
         </div>
@@ -290,16 +433,19 @@ function TransactionModal({
 // ── Component ───────────────────────────────────────────────
 
 export function Transactions() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [showCreate, setShowCreate] = useState(false)
   const [editingTx, setEditingTx] = useState<Transaction | null>(null)
 
-  // Filter state
-  const [searchText, setSearchText] = useState('')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
-  const [containerId, setContainerId] = useState('')
-  const [typeFilter, setTypeFilter] = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
+  // Filter state — initialized from URL search params if present
+  const [searchText, setSearchText] = useState(searchParams.get('search') || '')
+  const [dateFrom, setDateFrom] = useState(searchParams.get('dateFrom') || '')
+  const [dateTo, setDateTo] = useState(searchParams.get('dateTo') || '')
+  const [containerId, setContainerId] = useState(searchParams.get('containerId') || '')
+  const [counterpartyId, setCounterpartyId] = useState(searchParams.get('counterpartyId') || '')
+  const [typeFilter, setTypeFilter] = useState(searchParams.get('type') || '')
+  const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || '')
+  const [tagFilter, setTagFilter] = useState(searchParams.get('tagId') || '')
 
   // Table state
   const [sorting, setSorting] = useState<SortingState>([
@@ -307,31 +453,76 @@ export function Transactions() {
   ])
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
 
-  // ── Build API query params from filter state ───────────────
+  // Debounce ALL filter values (300ms) so that date pickers, search input,
+  // and dropdowns never trigger an API call while the user is still interacting.
+  const [debouncedFilters, setDebouncedFilters] = useState({
+    searchText, dateFrom, dateTo, containerId, counterpartyId, typeFilter, statusFilter, tagFilter,
+  })
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+  useEffect(() => {
+    debounceRef.current = setTimeout(() => {
+      setDebouncedFilters({ searchText, dateFrom, dateTo, containerId, counterpartyId, typeFilter, statusFilter, tagFilter })
+    }, 300)
+    return () => clearTimeout(debounceRef.current)
+  }, [searchText, dateFrom, dateTo, containerId, counterpartyId, typeFilter, statusFilter, tagFilter])
+
+  // Clear URL search params after initial load so they don't persist on navigation
+  useEffect(() => {
+    if (searchParams.toString()) {
+      setSearchParams({}, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ── Build API query params from debounced filter state ─────
   const queryParams = useMemo(() => {
     const params: Record<string, string> = {
       limit: '500',
       offset: '0',
     }
-    if (searchText) params.search = searchText
-    if (dateFrom) params.dateFrom = dateFrom
-    if (dateTo) params.dateTo = dateTo
-    if (containerId) params.containerId = containerId
-    if (typeFilter) params.type = typeFilter
-    if (statusFilter) params.status = statusFilter
+    if (debouncedFilters.searchText) params.search = debouncedFilters.searchText
+    if (debouncedFilters.dateFrom) params.dateFrom = debouncedFilters.dateFrom
+    if (debouncedFilters.dateTo) params.dateTo = debouncedFilters.dateTo
+    if (debouncedFilters.containerId) params.containerId = debouncedFilters.containerId
+    if (debouncedFilters.counterpartyId) params.counterpartyId = debouncedFilters.counterpartyId
+    if (debouncedFilters.typeFilter) params.type = debouncedFilters.typeFilter
+    if (debouncedFilters.statusFilter) params.status = debouncedFilters.statusFilter
+    if (debouncedFilters.tagFilter) params.tagId = debouncedFilters.tagFilter
     return params
-  }, [searchText, dateFrom, dateTo, containerId, typeFilter, statusFilter])
+  }, [debouncedFilters])
 
   // ── Data hooks ─────────────────────────────────────────────
   const { data: txData, isLoading: txLoading, error: txError } = useTransactions(queryParams)
   const { data: containers = [], isLoading: containersLoading } = useContainers()
   const { data: counterparties = [], isLoading: counterpartiesLoading } = useCounterparties()
   const { data: subjects = [] } = useSubjects()
+  const { data: tags = [] } = useTags()
 
   // ── Mutation hooks ─────────────────────────────────────────
   const createMutation = useCreateTransaction()
   const updateMutation = useUpdateTransaction()
   const deleteMutation = useDeleteTransaction()
+  const createCounterpartyMutation = useCreateCounterparty()
+  const createSubjectMutation = useCreateSubject()
+  const createTagMutation = useCreateTag()
+  const queryClient = useQueryClient()
+
+  // Inline-create callbacks for dropdowns
+  const handleCreateCounterparty = useCallback((name: string) => {
+    createCounterpartyMutation.mutate({ name, isActive: true })
+  }, [createCounterpartyMutation])
+
+  const handleCreateSubject = useCallback((name: string) => {
+    createSubjectMutation.mutate({ name, role: 'partner' as const, isActive: true })
+  }, [createSubjectMutation])
+
+  const handleCreateTag = useCallback((name: string) => {
+    createTagMutation.mutate({ name, type: 'custom' as const, isActive: true })
+  }, [createTagMutation])
+
+  // Transfer-specific operation state (not using react-query mutations)
+  const [transferSaving, setTransferSaving] = useState(false)
+  const [transferError, setTransferError] = useState<string | null>(null)
 
   const transactions = txData?.rows ?? []
   const totalCount = txData?.total ?? 0
@@ -356,22 +547,74 @@ export function Transactions() {
   )
 
   // ── CRUD handlers ──────────────────────────────────────────
-  function handleCreateTx(data: Record<string, unknown>) {
-    createMutation.mutate(data as Partial<Transaction>, {
-      onSuccess: () => setShowCreate(false),
-    })
+  async function handleCreateTx(data: Record<string, unknown>) {
+    if (data._isTransfer) {
+      setTransferSaving(true)
+      setTransferError(null)
+      try {
+        await transactionsApi.createTransfer({
+          date: data.date as string,
+          description: (data.description as string) || undefined,
+          amount: data.amount as string,
+          currency: (data.currency as string) || 'EUR',
+          fromContainerId: data.fromContainerId as string,
+          toContainerId: data.toContainerId as string,
+          status: (data.status as string) || 'completed',
+          source: (data.source as string) || 'manual',
+          notes: (data.notes as string) || undefined,
+        })
+        queryClient.invalidateQueries({ queryKey: ['transactions'] })
+        queryClient.invalidateQueries({ queryKey: ['stats'] })
+        setShowCreate(false)
+      } catch (err) {
+        setTransferError(err instanceof Error ? err.message : 'Errore nel salvataggio')
+      } finally {
+        setTransferSaving(false)
+      }
+    } else {
+      const tagIds = (data.tagIds as string[] | undefined) ?? []
+      createMutation.mutate({ ...(data as Partial<Transaction>), tagIds } as Partial<Transaction> & { tagIds?: string[] }, {
+        onSuccess: () => setShowCreate(false),
+      })
+    }
   }
 
-  function handleUpdateTx(data: Record<string, unknown>) {
+  async function handleUpdateTx(data: Record<string, unknown>) {
     if (!editingTx) return
-    updateMutation.mutate(
-      { id: editingTx.id, data: data as Partial<Transaction> },
-      { onSuccess: () => setEditingTx(null) },
-    )
+    if (data._isTransfer) {
+      setTransferSaving(true)
+      setTransferError(null)
+      try {
+        await transactionsApi.updateTransfer(editingTx.id, {
+          date: data.date as string,
+          description: (data.description as string) || undefined,
+          amount: data.amount as string,
+          currency: (data.currency as string) || 'EUR',
+          fromContainerId: data.fromContainerId as string,
+          toContainerId: data.toContainerId as string,
+          status: (data.status as string) || 'completed',
+          source: (data.source as string) || 'manual',
+          notes: (data.notes as string) || undefined,
+        })
+        queryClient.invalidateQueries({ queryKey: ['transactions'] })
+        queryClient.invalidateQueries({ queryKey: ['stats'] })
+        setEditingTx(null)
+      } catch (err) {
+        setTransferError(err instanceof Error ? err.message : 'Errore nel salvataggio')
+      } finally {
+        setTransferSaving(false)
+      }
+    } else {
+      const tagIds = (data.tagIds as string[] | undefined) ?? []
+      updateMutation.mutate(
+        { id: editingTx.id, data: { ...(data as Partial<Transaction>), tagIds } },
+        { onSuccess: () => setEditingTx(null) },
+      )
+    }
   }
 
-  const createErrorMsg = createMutation.error instanceof Error ? createMutation.error.message : createMutation.error ? 'Errore nel salvataggio' : null
-  const updateErrorMsg = updateMutation.error instanceof Error ? updateMutation.error.message : updateMutation.error ? 'Errore nel salvataggio' : null
+  const createErrorMsg = transferError || (createMutation.error instanceof Error ? createMutation.error.message : createMutation.error ? 'Errore nel salvataggio' : null)
+  const updateErrorMsg = transferError || (updateMutation.error instanceof Error ? updateMutation.error.message : updateMutation.error ? 'Errore nel salvataggio' : null)
 
   function handleDeleteTx(id: string) {
     if (!confirm('Eliminare questa transazione?')) return
@@ -405,16 +648,20 @@ export function Transactions() {
     dateFrom !== '' ||
     dateTo !== '' ||
     containerId !== '' ||
+    counterpartyId !== '' ||
     typeFilter !== '' ||
-    statusFilter !== ''
+    statusFilter !== '' ||
+    tagFilter !== ''
 
   function clearFilters() {
     setSearchText('')
     setDateFrom('')
     setDateTo('')
     setContainerId('')
+    setCounterpartyId('')
     setTypeFilter('')
     setStatusFilter('')
+    setTagFilter('')
   }
 
   // ── Column definitions ────────────────────────────────────
@@ -473,6 +720,32 @@ export function Transactions() {
             >
               {transactionTypeLabel(type)}
             </span>
+          )
+        },
+      },
+      {
+        id: 'tags',
+        header: 'Tag',
+        enableSorting: false,
+        cell: ({ row }) => {
+          const txTags = (row.original.tags || []) as Tag[]
+          if (txTags.length === 0) return <span className="text-zinc-600">—</span>
+          return (
+            <div className="flex flex-wrap gap-1">
+              {txTags.slice(0, 3).map(tag => (
+                <span
+                  key={tag.id}
+                  className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium bg-zinc-800 text-zinc-300"
+                  title={tag.name}
+                >
+                  <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ backgroundColor: tag.color || '#6b7280' }} />
+                  {tag.name.length > 12 ? tag.name.slice(0, 12) + '…' : tag.name}
+                </span>
+              ))}
+              {txTags.length > 3 && (
+                <span className="text-[10px] text-zinc-500">+{txTags.length - 3}</span>
+              )}
+            </div>
           )
         },
       },
@@ -555,7 +828,7 @@ export function Transactions() {
     getPaginationRowModel: getPaginationRowModel(),
     initialState: {
       pagination: {
-        pageSize: 25,
+        pageSize: 100,
       },
     },
   })
@@ -653,46 +926,59 @@ export function Transactions() {
           </div>
 
           {/* Container dropdown */}
-          <select
+          <SearchableSelect
             value={containerId}
-            onChange={(e) => setContainerId(e.target.value)}
-            className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-300 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500"
-          >
-            <option value="">Contenitore</option>
-            {containerOptions.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+            onChange={setContainerId}
+            options={containerOptions.map((c) => ({ value: c.id, label: c.name, color: c.color }))}
+            placeholder="Contenitore"
+            allowEmpty
+            emptyLabel="Tutti i contenitori"
+            className="min-w-[160px]"
+          />
+
+          {/* Counterparty dropdown */}
+          <SearchableSelect
+            value={counterpartyId}
+            onChange={setCounterpartyId}
+            options={counterparties.map((c) => ({ value: c.id, label: c.name }))}
+            placeholder="Controparte"
+            allowEmpty
+            emptyLabel="Tutte le controparti"
+            className="min-w-[150px]"
+          />
 
           {/* Type dropdown */}
-          <select
+          <SearchableSelect
             value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value)}
-            className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-300 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500"
-          >
-            <option value="">Tipo</option>
-            {typeOptions.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+            onChange={setTypeFilter}
+            options={filterTypeOptions.map((o) => ({ value: o.value, label: o.label }))}
+            placeholder="Tipo"
+            allowEmpty
+            emptyLabel="Tutti i tipi"
+            className="min-w-[140px]"
+          />
 
           {/* Status dropdown */}
-          <select
+          <SearchableSelect
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-300 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500"
-          >
-            <option value="">Stato</option>
-            {statusOptions.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+            onChange={setStatusFilter}
+            options={statusOptions.map((o) => ({ value: o.value, label: o.label }))}
+            placeholder="Stato"
+            allowEmpty
+            emptyLabel="Tutti gli stati"
+            className="min-w-[130px]"
+          />
+
+          {/* Tag dropdown */}
+          <SearchableSelect
+            value={tagFilter}
+            onChange={setTagFilter}
+            options={tags.filter(t => t.isActive).map((t) => ({ value: t.id, label: t.name, color: t.color }))}
+            placeholder="Tag"
+            allowEmpty
+            emptyLabel="Tutti i tag"
+            className="min-w-[130px]"
+          />
 
           {/* Clear filters */}
           {hasFilters && (
@@ -830,24 +1116,46 @@ export function Transactions() {
           <p className="text-sm text-zinc-500">
             {summary.filteredCount} transazioni
           </p>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => table.previousPage()}
-              disabled={!table.getCanPreviousPage()}
-              className="rounded-lg border border-zinc-700 bg-zinc-800 p-1.5 text-zinc-400 hover:text-zinc-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            <span className="text-sm text-zinc-400">
-              Pagina {pageIndex + 1} di {Math.max(pageCount, 1)}
-            </span>
-            <button
-              onClick={() => table.nextPage()}
-              disabled={!table.getCanNextPage()}
-              className="rounded-lg border border-zinc-700 bg-zinc-800 p-1.5 text-zinc-400 hover:text-zinc-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
+          <div className="flex items-center gap-4">
+            {/* Page size selector */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-zinc-500">Righe:</span>
+              <div className="flex items-center rounded-lg border border-zinc-700 bg-zinc-800 p-0.5">
+                {[25, 50, 100, 250, 500].map((size) => (
+                  <button
+                    key={size}
+                    onClick={() => table.setPageSize(size)}
+                    className={`rounded-md px-2 py-1 text-xs transition-colors ${
+                      table.getState().pagination.pageSize === size
+                        ? 'bg-zinc-600 text-zinc-100'
+                        : 'text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    {size}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* Page navigation */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => table.previousPage()}
+                disabled={!table.getCanPreviousPage()}
+                className="rounded-lg border border-zinc-700 bg-zinc-800 p-1.5 text-zinc-400 hover:text-zinc-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <span className="text-sm text-zinc-400">
+                Pagina {pageIndex + 1} di {Math.max(pageCount, 1)}
+              </span>
+              <button
+                onClick={() => table.nextPage()}
+                disabled={!table.getCanNextPage()}
+                className="rounded-lg border border-zinc-700 bg-zinc-800 p-1.5 text-zinc-400 hover:text-zinc-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -855,13 +1163,17 @@ export function Transactions() {
       {/* ── Create Modal ─────────────────────────────────── */}
       {showCreate && (
         <TransactionModal
-          onClose={() => { setShowCreate(false); createMutation.reset() }}
+          onClose={() => { setShowCreate(false); createMutation.reset(); setTransferError(null) }}
           onSave={handleCreateTx}
           containers={containers}
           counterparties={counterparties}
           subjects={subjects}
-          isSaving={createMutation.isPending}
+          tags={tags}
+          isSaving={createMutation.isPending || transferSaving}
           saveError={createErrorMsg}
+          onCreateCounterparty={handleCreateCounterparty}
+          onCreateSubject={handleCreateSubject}
+          onCreateTag={handleCreateTag}
         />
       )}
 
@@ -869,13 +1181,22 @@ export function Transactions() {
       {editingTx && (
         <TransactionModal
           existing={editingTx}
-          onClose={() => { setEditingTx(null); updateMutation.reset() }}
+          linkedTransaction={
+            editingTx.transferLinkedId
+              ? transactions.find(t => t.id === editingTx.transferLinkedId) ?? null
+              : null
+          }
+          onClose={() => { setEditingTx(null); updateMutation.reset(); setTransferError(null) }}
           onSave={handleUpdateTx}
           containers={containers}
           counterparties={counterparties}
           subjects={subjects}
-          isSaving={updateMutation.isPending}
+          tags={tags}
+          isSaving={updateMutation.isPending || transferSaving}
           saveError={updateErrorMsg}
+          onCreateCounterparty={handleCreateCounterparty}
+          onCreateSubject={handleCreateSubject}
+          onCreateTag={handleCreateTag}
         />
       )}
     </div>

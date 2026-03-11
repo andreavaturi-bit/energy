@@ -355,3 +355,24 @@ export interface ProjectionItem {
   recurrenceId?: string
   runningBalance: number
 }
+
+export interface SmartRule {
+  id: string
+  name: string
+  descriptionPattern?: string | null
+  counterpartyId?: string | null
+  containerId?: string | null
+  amountMin?: string | null
+  amountMax?: string | null
+  transactionType?: string | null
+  assignTagId: string
+  priority: number
+  isActive: boolean
+  autoApply: boolean
+  createdAt: string
+  updatedAt: string
+  // Joined
+  assignTag?: Tag
+  counterparty?: Counterparty
+  container?: Container
+}

@@ -7,31 +7,26 @@ import {
   ChevronRight,
   AlertTriangle,
   Info,
+  Loader2,
 } from 'lucide-react'
-
-// Types reference: ProjectionItem from @/types
-
-// Placeholder projection timeline
-const mockProjections = [
-  { date: '07/02/2026', description: 'Saldo attuale', amount: null, isEstimate: false, runningBalance: 42350, type: 'balance' as const },
-  { date: '15/02/2026', description: 'Netflix', amount: -17.99, isEstimate: false, runningBalance: 42332.01, type: 'expense' as const },
-  { date: '15/02/2026', description: 'Saldo Amex Platino', amount: -1200, isEstimate: false, runningBalance: 41132.01, type: 'expense' as const },
-  { date: '22/02/2026', description: 'Spotify Family', amount: -17.99, isEstimate: false, runningBalance: 41114.02, type: 'expense' as const },
-  { date: '27/02/2026', description: 'Stipendio Kairos SRLS', amount: 3200, isEstimate: false, runningBalance: 44314.02, type: 'income' as const },
-  { date: '01/03/2026', description: 'Affitto Casa', amount: -950, isEstimate: false, runningBalance: 43364.02, type: 'expense' as const },
-  { date: '01/03/2026', description: 'Rata MacBook Pro', amount: -333.25, isEstimate: false, runningBalance: 43030.77, type: 'expense' as const },
-  { date: '15/03/2026', description: 'Netflix', amount: -17.99, isEstimate: false, runningBalance: 43012.78, type: 'expense' as const },
-  { date: '16/03/2026', description: 'F24 IVA Q4 2025', amount: -2400, isEstimate: true, runningBalance: 40612.78, type: 'expense' as const },
-  { date: '22/03/2026', description: 'Spotify Family', amount: -17.99, isEstimate: false, runningBalance: 40594.79, type: 'expense' as const },
-  { date: '27/03/2026', description: 'Stipendio Kairos SRLS', amount: 3200, isEstimate: false, runningBalance: 43794.79, type: 'income' as const },
-  { date: '01/04/2026', description: 'Affitto Casa', amount: -950, isEstimate: false, runningBalance: 42844.79, type: 'expense' as const },
-  { date: '01/04/2026', description: 'Rata Assicurazione Auto', amount: -300, isEstimate: false, runningBalance: 42544.79, type: 'expense' as const },
-  { date: '05/04/2026', description: 'Bolletta Enel (stima)', amount: -140, isEstimate: true, runningBalance: 42404.79, type: 'expense' as const },
-]
+import { useContainers } from '@/lib/hooks'
+import { formatCurrency } from '@/lib/utils'
 
 export function Projections() {
-  const minBalance = Math.min(...mockProjections.map((p) => p.runningBalance))
-  const maxBalance = Math.max(...mockProjections.map((p) => p.runningBalance))
+  const { data: containers = [], isLoading } = useContainers()
+
+  // Compute total balance across all active EUR containers
+  const totalBalance = containers
+    .filter((c) => c.isActive && c.currency === 'EUR')
+    .reduce((sum, c) => sum + parseFloat(c.currentBalance ?? c.initialBalance ?? '0'), 0)
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="h-8 w-8 animate-spin text-energy-400" />
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -46,28 +41,22 @@ export function Projections() {
       {/* Summary cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-          <p className="text-xs text-zinc-500">Saldo Attuale</p>
+          <p className="text-xs text-zinc-500">Saldo Attuale (EUR)</p>
           <p className="mt-1 text-xl font-bold text-zinc-100">
-            {'\u20AC'} 42.350,00
+            {formatCurrency(totalBalance, 'EUR')}
           </p>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
           <p className="text-xs text-zinc-500">Saldo Previsto (3 mesi)</p>
-          <p className="mt-1 text-xl font-bold text-energy-400">
-            {'\u20AC'} {mockProjections[mockProjections.length - 1].runningBalance.toLocaleString('it-IT', { minimumFractionDigits: 2 })}
-          </p>
+          <p className="mt-1 text-xl font-bold text-zinc-500">—</p>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
           <p className="text-xs text-zinc-500">Minimo Previsto</p>
-          <p className="mt-1 text-xl font-bold text-amber-400">
-            {'\u20AC'} {minBalance.toLocaleString('it-IT', { minimumFractionDigits: 2 })}
-          </p>
+          <p className="mt-1 text-xl font-bold text-zinc-500">—</p>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
           <p className="text-xs text-zinc-500">Massimo Previsto</p>
-          <p className="mt-1 text-xl font-bold text-emerald-400">
-            {'\u20AC'} {maxBalance.toLocaleString('it-IT', { minimumFractionDigits: 2 })}
-          </p>
+          <p className="mt-1 text-xl font-bold text-zinc-500">—</p>
         </div>
       </div>
 
@@ -81,10 +70,10 @@ export function Projections() {
           <div className="text-center">
             <TrendingUp className="h-10 w-10 text-zinc-600 mx-auto mb-2" />
             <p className="text-sm text-zinc-500">
-              Grafico timeline flusso di cassa proiettato
+              Le proiezioni verranno calcolate automaticamente
             </p>
             <p className="text-xs text-zinc-600 mt-1">
-              Placeholder per libreria grafici (Recharts / Chart.js)
+              dalle ricorrenze attive, pendenze e piani rateali
             </p>
           </div>
         </div>
@@ -98,78 +87,23 @@ export function Projections() {
             Le proiezioni si basano sulle ricorrenze attive, le pendenze in scadenza e i piani rateali in corso.
           </p>
           <p className="text-xs text-blue-400/60 mt-1">
-            I valori stimati sono indicati con il simbolo di approssimazione (~).
+            Configura le ricorrenze nella sezione dedicata per vedere le proiezioni.
           </p>
         </div>
       </div>
 
-      {/* Projection timeline table */}
+      {/* Empty timeline */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
         <div className="flex items-center gap-2 px-6 py-4 border-b border-zinc-800">
           <Calendar className="h-5 w-5 text-zinc-400" />
           <h2 className="text-lg font-semibold text-zinc-100">Timeline Dettagliata</h2>
         </div>
-        <div className="divide-y divide-zinc-800/50">
-          {mockProjections.map((item, i) => (
-            <div
-              key={i}
-              className={`flex items-center gap-4 px-6 py-3 hover:bg-zinc-800/30 transition-colors ${
-                item.type === 'balance' ? 'bg-zinc-800/20' : ''
-              }`}
-            >
-              {/* Icon */}
-              <div className="shrink-0">
-                {item.type === 'balance' ? (
-                  <Minus className="h-4 w-4 text-zinc-500" />
-                ) : item.type === 'income' ? (
-                  <ArrowUpCircle className="h-4 w-4 text-emerald-400" />
-                ) : (
-                  <ArrowDownCircle className="h-4 w-4 text-red-400" />
-                )}
-              </div>
-
-              {/* Date */}
-              <div className="shrink-0 w-24">
-                <p className="text-sm text-zinc-400">{item.date}</p>
-              </div>
-
-              {/* Description */}
-              <div className="flex-1 min-w-0 flex items-center gap-2">
-                <p className={`text-sm truncate ${
-                  item.type === 'balance' ? 'font-semibold text-zinc-200' : 'text-zinc-300'
-                }`}>
-                  {item.description}
-                </p>
-                {item.isEstimate && (
-                  <span className="flex items-center gap-0.5 shrink-0">
-                    <AlertTriangle className="h-3 w-3 text-amber-500" />
-                    <span className="text-xs text-amber-500">~stima</span>
-                  </span>
-                )}
-              </div>
-
-              {/* Amount */}
-              <div className="shrink-0 w-28 text-right">
-                {item.amount !== null && (
-                  <p className={`text-sm font-medium ${
-                    item.amount > 0 ? 'text-emerald-400' : 'text-red-400'
-                  }`}>
-                    {item.amount > 0 ? '+' : ''}{'\u20AC'} {Math.abs(item.amount).toLocaleString('it-IT', { minimumFractionDigits: 2 })}
-                  </p>
-                )}
-              </div>
-
-              {/* Arrow */}
-              <ChevronRight className="h-3 w-3 text-zinc-700 shrink-0" />
-
-              {/* Running balance */}
-              <div className="shrink-0 w-36 text-right">
-                <p className="text-sm font-semibold text-zinc-100">
-                  {'\u20AC'} {item.runningBalance.toLocaleString('it-IT', { minimumFractionDigits: 2 })}
-                </p>
-              </div>
-            </div>
-          ))}
+        <div className="flex flex-col items-center justify-center py-16 text-zinc-500">
+          <Calendar className="h-8 w-8 mb-2 opacity-50" />
+          <p className="text-sm">Nessuna proiezione disponibile</p>
+          <p className="text-xs text-zinc-600 mt-1">
+            Le proiezioni appariranno quando saranno configurate ricorrenze e pendenze
+          </p>
         </div>
       </div>
     </div>

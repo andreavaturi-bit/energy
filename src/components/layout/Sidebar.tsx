@@ -5,6 +5,8 @@ import {
   ArrowLeftRight,
   Wallet,
   Users,
+  Contact,
+  Tag,
   PieChart,
   Calendar,
   Clock,
@@ -14,6 +16,7 @@ import {
   Settings,
   X,
   Zap,
+  Wand2,
 } from 'lucide-react'
 
 interface SidebarProps {
@@ -25,12 +28,15 @@ const navItems = [
   { to: '/transactions', icon: ArrowLeftRight, label: 'Transazioni' },
   { to: '/containers', icon: Wallet, label: 'Contenitori' },
   { to: '/subjects', icon: Users, label: 'Soggetti' },
+  { to: '/counterparties', icon: Contact, label: 'Controparti' },
+  { to: '/tags', icon: Tag, label: 'Tag' },
   { to: '/budget', icon: PieChart, label: 'Budget' },
   { to: '/recurrences', icon: Calendar, label: 'Ricorrenze' },
   { to: '/pendenze', icon: Clock, label: 'Pendenze' },
   { to: '/projections', icon: TrendingUp, label: 'Proiezioni' },
   { to: '/import', icon: Upload, label: 'Import' },
   { to: '/statistics', icon: BarChart3, label: 'Statistiche' },
+  { to: '/smart-rules', icon: Wand2, label: 'Regole Smart' },
   { to: '/settings', icon: Settings, label: 'Impostazioni' },
 ]
 

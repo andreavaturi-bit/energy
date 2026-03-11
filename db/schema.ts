@@ -458,3 +458,30 @@ export const reminders = pgTable('reminders', {
   index('idx_reminders_date').on(table.reminderDate),
   index('idx_reminders_status').on(table.status),
 ])
+
+// ============================================================
+// SMART RULES - Regole automatiche di categorizzazione
+// "Se la descrizione contiene X → assegna tag Y"
+// ============================================================
+export const smartRules = pgTable('smart_rules', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: text('name').notNull(),
+  // Condizioni (tutte opzionali, AND tra di loro)
+  descriptionPattern: text('description_pattern'),       // regex o substring match
+  counterpartyId: uuid('counterparty_id').references(() => counterparties.id),
+  containerId: uuid('container_id').references(() => containers.id),
+  amountMin: decimal('amount_min', { precision: 15, scale: 4 }),
+  amountMax: decimal('amount_max', { precision: 15, scale: 4 }),
+  transactionType: text('transaction_type'),             // income, expense, etc.
+  // Azioni
+  assignTagId: uuid('assign_tag_id').notNull().references(() => tags.id),
+  // Meta
+  priority: integer('priority').default(0).notNull(),    // Higher = evaluated first
+  isActive: boolean('is_active').default(true).notNull(),
+  autoApply: boolean('auto_apply').default(true).notNull(), // Apply on import
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index('idx_smart_rules_priority').on(table.priority),
+  index('idx_smart_rules_tag').on(table.assignTagId),
+])

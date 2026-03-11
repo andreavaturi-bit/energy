@@ -5,7 +5,7 @@
  * Data is fetched, cached, and auto-refreshed via TanStack Query.
  */
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import {
   subjectsApi,
   containersApi,
@@ -15,6 +15,7 @@ import {
   recurrencesApi,
   budgetApi,
   statsApi,
+  smartRulesApi,
   type TransactionListResponse,
   type BudgetPeriodWithAllocations,
 } from './api'
@@ -26,6 +27,7 @@ import type {
   Tag,
   Transaction,
   Recurrence,
+  SmartRule,
 } from '@/types'
 
 // ── Query keys ──────────────────────────────────────────────
@@ -39,6 +41,7 @@ export const queryKeys = {
   recurrences: ['recurrences'] as const,
   budget: ['budget'] as const,
   stats: ['stats'] as const,
+  smartRules: ['smart-rules'] as const,
 }
 
 // ── Subjects ────────────────────────────────────────────────
@@ -173,6 +176,27 @@ export function useCreateCounterparty() {
   })
 }
 
+export function useUpdateCounterparty() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<Counterparty> }) =>
+      counterpartiesApi.update(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.counterparties })
+    },
+  })
+}
+
+export function useDeleteCounterparty() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => counterpartiesApi.delete(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.counterparties })
+    },
+  })
+}
+
 // ── Tags ────────────────────────────────────────────────────
 
 export function useTags() {
@@ -230,6 +254,7 @@ export function useTransactions(params?: Record<string, string>) {
         offset: data.offset,
       } as TransactionListResponse & { rows: Transaction[] }
     },
+    placeholderData: keepPreviousData,
   })
 }
 
@@ -361,6 +386,49 @@ export function useDeleteBudgetAllocation() {
     mutationFn: (id: string) => budgetApi.deleteAllocation(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.budget })
+    },
+  })
+}
+
+// ── Smart Rules ─────────────────────────────────────────────
+
+export function useSmartRules() {
+  return useQuery({
+    queryKey: queryKeys.smartRules,
+    queryFn: async () => {
+      const data = await smartRulesApi.list()
+      return snakeToCamel<SmartRule[]>(data as never)
+    },
+  })
+}
+
+export function useCreateSmartRule() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data: Partial<SmartRule>) => smartRulesApi.create(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.smartRules })
+    },
+  })
+}
+
+export function useUpdateSmartRule() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<SmartRule> }) =>
+      smartRulesApi.update(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.smartRules })
+    },
+  })
+}
+
+export function useDeleteSmartRule() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => smartRulesApi.delete(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.smartRules })
     },
   })
 }

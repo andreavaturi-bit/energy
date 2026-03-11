@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import {
   Plus,
   Calendar,
@@ -12,35 +12,24 @@ import {
   ArrowLeftRight,
   X,
   Search,
-  Filter,
   Clock,
+  Wand2,
+  Loader2,
+  Check,
+  ChevronRight,
 } from 'lucide-react'
-import { useContainers, useCounterparties } from '@/lib/hooks'
-import { formatCurrency } from '@/lib/utils'
-import type { Frequency, TransactionType } from '@/types'
-
-interface MockRecurrence {
-  id: string
-  description: string
-  frequency: Frequency
-  intervalDays?: number
-  dayOfMonth?: number
-  dayOfWeek?: number
-  businessDaysOnly: boolean
-  amount: string
-  amountIsEstimate: boolean
-  currency: string
-  containerId: string
-  counterpartyId?: string
-  type: TransactionType
-  sharedWithSubjectId?: string
-  sharePercentage?: string
-  startDate: string
-  endDate?: string
-  reminderDaysBefore?: number
-  isActive: boolean
-  tags: string[]
-}
+import { Badge } from '@/components/ui/Badge'
+import {
+  useContainers,
+  useCounterparties,
+  useRecurrences,
+  useCreateRecurrence,
+  useUpdateRecurrence,
+  useDeleteRecurrence,
+} from '@/lib/hooks'
+import { recurrencesApi, type DetectedPattern } from '@/lib/api'
+import { formatCurrency, cn } from '@/lib/utils'
+import type { Frequency, TransactionType, Recurrence } from '@/types'
 
 const frequencyLabels: Record<Frequency, string> = {
   daily: 'Giornaliera',
@@ -54,31 +43,7 @@ const frequencyLabels: Record<Frequency, string> = {
   custom: 'Personalizzata',
 }
 
-const typeLabels: Record<string, string> = {
-  income: 'Entrata',
-  expense: 'Uscita',
-  transfer_out: 'Trasferimento',
-}
-
-// Realistic mock recurrences based on Andrea's actual financial data
-const initialRecurrences: MockRecurrence[] = [
-  { id: 'rec-1', description: 'Affitto casa', frequency: 'monthly', dayOfMonth: 1, businessDaysOnly: false, amount: '-1800.00', amountIsEstimate: false, currency: 'EUR', containerId: 'c-isp', counterpartyId: 'cp-proprietario', type: 'expense', startDate: '2024-01-01', isActive: true, tags: ['Affitto', 'Familiare'] },
-  { id: 'rec-2', description: 'Netflix', frequency: 'monthly', dayOfMonth: 15, businessDaysOnly: false, amount: '-17.99', amountIsEstimate: false, currency: 'EUR', containerId: 'c-amex-av', counterpartyId: 'cp-netflix', type: 'expense', startDate: '2024-01-01', isActive: true, tags: ['Netflix', 'Familiare'] },
-  { id: 'rec-3', description: 'Spotify Family', frequency: 'monthly', dayOfMonth: 22, businessDaysOnly: false, amount: '-17.99', amountIsEstimate: false, currency: 'EUR', containerId: 'c-amex-av', counterpartyId: 'cp-spotify', type: 'expense', startDate: '2024-01-01', isActive: true, tags: ['Spotify', 'Familiare'] },
-  { id: 'rec-4', description: 'Bolletta Enel', frequency: 'bimonthly', dayOfMonth: 5, businessDaysOnly: false, amount: '-245.00', amountIsEstimate: true, currency: 'EUR', containerId: 'c-isp', counterpartyId: 'cp-enel', type: 'expense', startDate: '2024-01-01', isActive: true, tags: ['Bollette', 'Familiare'] },
-  { id: 'rec-5', description: 'Baby sitter Monia', frequency: 'weekly', dayOfWeek: 5, businessDaysOnly: false, amount: '-300.00', amountIsEstimate: false, currency: 'EUR', containerId: 'c-isp', counterpartyId: 'cp-monia', type: 'expense', startDate: '2024-09-01', isActive: true, tags: ['Baby Sitter', 'Familiare'] },
-  { id: 'rec-6', description: 'Ricarica Satispay', frequency: 'weekly', dayOfWeek: 1, businessDaysOnly: false, amount: '-100.00', amountIsEstimate: false, currency: 'EUR', containerId: 'c-isp', type: 'transfer_out', startDate: '2024-01-01', isActive: true, tags: ['Personale'] },
-  { id: 'rec-7', description: 'Incasso corso Opzionetika', frequency: 'monthly', dayOfMonth: 10, businessDaysOnly: true, amount: '4200.00', amountIsEstimate: true, currency: 'EUR', containerId: 'c-isp-kairos', type: 'income', sharedWithSubjectId: 's-mirko', sharePercentage: '50', startDate: '2024-01-01', isActive: true, tags: ['Corsi VS', 'Da dividere con Mirko'] },
-  { id: 'rec-8', description: 'ChatGPT Plus', frequency: 'monthly', dayOfMonth: 1, businessDaysOnly: false, amount: '-20.00', amountIsEstimate: false, currency: 'USD', containerId: 'c-amex-av', type: 'expense', startDate: '2024-06-01', isActive: true, tags: ['ChatGPT', 'Personale'] },
-  { id: 'rec-9', description: 'Claude Pro', frequency: 'monthly', dayOfMonth: 5, businessDaysOnly: false, amount: '-20.00', amountIsEstimate: false, currency: 'USD', containerId: 'c-amex-av', type: 'expense', startDate: '2024-09-01', isActive: true, tags: ['Claude', 'Personale'] },
-  { id: 'rec-10', description: 'TradingView Pro', frequency: 'annual', dayOfMonth: 15, businessDaysOnly: false, amount: '-159.00', amountIsEstimate: false, currency: 'USD', containerId: 'c-amex-vs', type: 'expense', startDate: '2024-03-15', isActive: true, tags: ['TradingView', 'VS / Opzionetika'] },
-  { id: 'rec-11', description: 'VPS Hosting', frequency: 'monthly', dayOfMonth: 1, businessDaysOnly: false, amount: '-24.00', amountIsEstimate: false, currency: 'EUR', containerId: 'c-pp-kairos', type: 'expense', startDate: '2024-01-01', isActive: false, tags: ['VPN/VPS', 'Aziendale Kairos'] },
-  { id: 'rec-12', description: 'Spesa Esselunga settimanale', frequency: 'weekly', dayOfWeek: 6, businessDaysOnly: false, amount: '-180.00', amountIsEstimate: true, currency: 'EUR', containerId: 'c-amex-av', counterpartyId: 'cp-esselunga', type: 'expense', startDate: '2024-01-01', isActive: true, tags: ['Spesa alimentare', 'Familiare'] },
-  { id: 'rec-13', description: 'Commercialista aziendale', frequency: 'quarterly', dayOfMonth: 15, businessDaysOnly: true, amount: '-500.00', amountIsEstimate: false, currency: 'EUR', containerId: 'c-isp-kairos', type: 'expense', startDate: '2024-01-01', isActive: true, tags: ['Commercialista aziendale', 'Aziendale Kairos'] },
-  { id: 'rec-14', description: 'F24 IVA trimestrale', frequency: 'quarterly', dayOfMonth: 16, businessDaysOnly: true, amount: '-3200.00', amountIsEstimate: true, currency: 'EUR', containerId: 'c-isp-kairos', counterpartyId: 'cp-ade', type: 'expense', startDate: '2024-03-16', reminderDaysBefore: 7, isActive: true, tags: ['F24 - IVA', 'Aziendale Kairos'] },
-]
-
-function getNextOccurrence(rec: MockRecurrence): string {
+function getNextOccurrence(rec: { dayOfMonth?: number | null; dayOfWeek?: number | null; frequency: string }): string {
   const now = new Date()
   const next = new Date(now)
 
@@ -87,7 +52,7 @@ function getNextOccurrence(rec: MockRecurrence): string {
     if (next <= now) {
       next.setMonth(next.getMonth() + 1)
     }
-  } else if (rec.dayOfWeek !== undefined) {
+  } else if (rec.dayOfWeek != null) {
     const diff = (rec.dayOfWeek - now.getDay() + 7) % 7
     next.setDate(now.getDate() + (diff === 0 ? 7 : diff))
   }
@@ -95,7 +60,7 @@ function getNextOccurrence(rec: MockRecurrence): string {
   return next.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
-function getDaysUntilNext(rec: MockRecurrence): number {
+function getDaysUntilNext(rec: { dayOfMonth?: number | null; dayOfWeek?: number | null }): number {
   const now = new Date()
   now.setHours(0, 0, 0, 0)
   const next = new Date(now)
@@ -105,7 +70,7 @@ function getDaysUntilNext(rec: MockRecurrence): number {
     if (next <= now) {
       next.setMonth(next.getMonth() + 1)
     }
-  } else if (rec.dayOfWeek !== undefined) {
+  } else if (rec.dayOfWeek != null) {
     const diff = (rec.dayOfWeek - now.getDay() + 7) % 7
     next.setDate(now.getDate() + (diff === 0 ? 7 : diff))
   }
@@ -113,9 +78,8 @@ function getDaysUntilNext(rec: MockRecurrence): number {
   return Math.ceil((next.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
 }
 
-function getMonthlyImpact(rec: MockRecurrence): number {
-  const amount = parseFloat(rec.amount)
-  switch (rec.frequency) {
+function getMonthlyImpact(amount: number, frequency: string): number {
+  switch (frequency) {
     case 'daily': return amount * 30
     case 'weekly': return amount * 4.33
     case 'biweekly': return amount * 2.17
@@ -131,12 +95,17 @@ function getMonthlyImpact(rec: MockRecurrence): number {
 export function Recurrences() {
   const { data: containers = [] } = useContainers()
   const { data: counterparties = [] } = useCounterparties()
-  const [recurrences, setRecurrences] = useState<MockRecurrence[]>(initialRecurrences)
+  const { data: recurrences = [], isLoading } = useRecurrences()
+  const createRecurrence = useCreateRecurrence()
+  const updateRecurrence = useUpdateRecurrence()
+  const deleteRecurrence = useDeleteRecurrence()
+
   const [search, setSearch] = useState('')
   const [filterType, setFilterType] = useState<'all' | 'income' | 'expense' | 'transfer_out'>('all')
   const [showInactive, setShowInactive] = useState(false)
   const [showModal, setShowModal] = useState(false)
-  const [editingRec, setEditingRec] = useState<MockRecurrence | null>(null)
+  const [editingRec, setEditingRec] = useState<Recurrence | null>(null)
+  const [showDetectWizard, setShowDetectWizard] = useState(false)
 
   const filtered = useMemo(() => {
     return recurrences.filter((r) => {
@@ -144,10 +113,7 @@ export function Recurrences() {
       if (filterType !== 'all' && r.type !== filterType) return false
       if (search) {
         const q = search.toLowerCase()
-        return (
-          r.description.toLowerCase().includes(q) ||
-          r.tags.some((t) => t.toLowerCase().includes(q))
-        )
+        return r.description.toLowerCase().includes(q)
       }
       return true
     })
@@ -157,32 +123,22 @@ export function Recurrences() {
   const inactiveCount = recurrences.filter((r) => !r.isActive).length
 
   const monthlyExpenses = activeRecs
-    .filter((r) => parseFloat(r.amount) < 0)
-    .reduce((sum, r) => sum + Math.abs(getMonthlyImpact(r)), 0)
+    .filter((r) => r.amount && parseFloat(r.amount) < 0)
+    .reduce((sum, r) => sum + Math.abs(getMonthlyImpact(parseFloat(r.amount!), r.frequency)), 0)
   const monthlyIncome = activeRecs
-    .filter((r) => parseFloat(r.amount) > 0)
-    .reduce((sum, r) => sum + getMonthlyImpact(r), 0)
+    .filter((r) => r.amount && parseFloat(r.amount) > 0)
+    .reduce((sum, r) => sum + getMonthlyImpact(parseFloat(r.amount!), r.frequency), 0)
 
-  const nextRec = activeRecs.sort((a, b) => getDaysUntilNext(a) - getDaysUntilNext(b))[0]
+  const nextRec = activeRecs
+    .filter(r => r.dayOfMonth || r.dayOfWeek != null)
+    .sort((a, b) => getDaysUntilNext(a) - getDaysUntilNext(b))[0]
 
-  function toggleActive(id: string) {
-    setRecurrences((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, isActive: !r.isActive } : r)),
-    )
+  function toggleActive(rec: Recurrence) {
+    updateRecurrence.mutate({ id: rec.id, data: { isActive: !rec.isActive } })
   }
 
-  function deleteRec(id: string) {
-    setRecurrences((prev) => prev.filter((r) => r.id !== id))
-  }
-
-  function openEdit(rec: MockRecurrence) {
-    setEditingRec(rec)
-    setShowModal(true)
-  }
-
-  function openCreate() {
-    setEditingRec(null)
-    setShowModal(true)
+  function handleDelete(id: string) {
+    deleteRecurrence.mutate(id)
   }
 
   return (
@@ -195,13 +151,22 @@ export function Recurrences() {
             {activeRecs.length} ricorrenze attive, {inactiveCount} in pausa
           </p>
         </div>
-        <button
-          className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors"
-          onClick={openCreate}
-        >
-          <Plus className="h-4 w-4" />
-          Nuova Ricorrenza
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            className="flex items-center gap-2 rounded-lg border border-purple-500/50 bg-purple-500/10 px-4 py-2 text-sm font-medium text-purple-400 hover:bg-purple-500/20 transition-colors"
+            onClick={() => setShowDetectWizard(true)}
+          >
+            <Wand2 className="h-4 w-4" />
+            Rileva Automaticamente
+          </button>
+          <button
+            className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors"
+            onClick={() => { setEditingRec(null); setShowModal(true) }}
+          >
+            <Plus className="h-4 w-4" />
+            Nuova Ricorrenza
+          </button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -236,11 +201,13 @@ export function Recurrences() {
             <Calendar className="h-4 w-4 text-amber-400" />
             <p className="text-xs text-zinc-500">Prossima Scadenza</p>
           </div>
-          {nextRec && (
+          {nextRec ? (
             <>
               <p className="mt-1 text-lg font-bold text-amber-400">{getNextOccurrence(nextRec)}</p>
               <p className="text-xs text-zinc-500">{nextRec.description} — tra {getDaysUntilNext(nextRec)} giorni</p>
             </>
+          ) : (
+            <p className="mt-1 text-lg font-bold text-zinc-600">—</p>
           )}
         </div>
       </div>
@@ -292,16 +259,28 @@ export function Recurrences() {
           </h2>
         </div>
         <div className="divide-y divide-zinc-800/50">
-          {filtered.length === 0 ? (
+          {isLoading ? (
+            <div className="flex items-center justify-center gap-2 py-12 text-zinc-500">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              <p className="text-sm">Caricamento...</p>
+            </div>
+          ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-12 text-zinc-500">
               <Repeat className="h-8 w-8" />
               <p className="text-sm">Nessuna ricorrenza trovata</p>
+              {recurrences.length === 0 && (
+                <p className="text-xs text-zinc-600">
+                  Prova il pulsante "Rileva Automaticamente" per trovare pattern nelle transazioni
+                </p>
+              )}
             </div>
           ) : (
             filtered.map((rec) => {
               const container = containers.find((c) => c.id === rec.containerId)
               const counterparty = rec.counterpartyId ? counterparties.find((cp) => cp.id === rec.counterpartyId) : null
-              const amount = parseFloat(rec.amount)
+              const amount = rec.amount ? parseFloat(rec.amount) : 0
+              const containerName = (rec as unknown as Record<string, unknown>).containerName as string || container?.name || 'N/A'
+              const counterpartyName = (rec as unknown as Record<string, unknown>).counterpartyName as string || counterparty?.name || null
               const daysUntil = getDaysUntilNext(rec)
 
               return (
@@ -345,27 +324,18 @@ export function Recurrences() {
                       )}
                     </div>
                     <div className="flex items-center gap-3 mt-1">
-                      <span className="text-xs text-zinc-500">
-                        {container?.name || 'N/A'}
-                      </span>
-                      {counterparty && (
+                      <span className="text-xs text-zinc-500">{containerName}</span>
+                      {counterpartyName && (
                         <>
                           <span className="text-xs text-zinc-600">|</span>
-                          <span className="text-xs text-zinc-500">{counterparty.name}</span>
+                          <span className="text-xs text-zinc-500">{counterpartyName}</span>
                         </>
                       )}
                       <span className="text-xs text-zinc-600">|</span>
                       <span className="text-xs text-zinc-500">
-                        {frequencyLabels[rec.frequency]}
+                        {frequencyLabels[rec.frequency as Frequency] || rec.frequency}
                         {rec.businessDaysOnly ? ' (gg. lav.)' : ''}
                       </span>
-                    </div>
-                    <div className="flex flex-wrap gap-1 mt-1.5">
-                      {rec.tags.map((tag) => (
-                        <span key={tag} className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-400">
-                          {tag}
-                        </span>
-                      ))}
                     </div>
                   </div>
 
@@ -386,7 +356,7 @@ export function Recurrences() {
                       {amount > 0 ? '+' : ''}{formatCurrency(amount, rec.currency)}
                     </p>
                     <p className="text-[10px] text-zinc-500">
-                      {formatCurrency(getMonthlyImpact(rec))}/mese
+                      {formatCurrency(getMonthlyImpact(amount, rec.frequency))}/mese
                     </p>
                   </div>
 
@@ -395,21 +365,21 @@ export function Recurrences() {
                     <button
                       className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
                       title={rec.isActive ? 'Metti in pausa' : 'Riattiva'}
-                      onClick={() => toggleActive(rec.id)}
+                      onClick={() => toggleActive(rec)}
                     >
                       {rec.isActive ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                     </button>
                     <button
                       className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
                       title="Modifica"
-                      onClick={() => openEdit(rec)}
+                      onClick={() => { setEditingRec(rec); setShowModal(true) }}
                     >
                       <Pencil className="h-4 w-4" />
                     </button>
                     <button
                       className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-red-400"
                       title="Elimina"
-                      onClick={() => deleteRec(rec.id)}
+                      onClick={() => handleDelete(rec.id)}
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
@@ -456,19 +426,332 @@ export function Recurrences() {
           onClose={() => setShowModal(false)}
           onSave={(data) => {
             if (editingRec) {
-              setRecurrences((prev) =>
-                prev.map((r) => (r.id === editingRec.id ? { ...r, ...data } : r)),
-              )
+              updateRecurrence.mutate({ id: editingRec.id, data })
             } else {
-              setRecurrences((prev) => [...prev, { ...data, id: `rec-${Date.now()}`, isActive: true }])
+              createRecurrence.mutate(data)
             }
             setShowModal(false)
           }}
         />
       )}
+
+      {/* Auto-detect wizard */}
+      {showDetectWizard && (
+        <DetectRecurrencesWizard
+          onClose={() => setShowDetectWizard(false)}
+        />
+      )}
     </div>
   )
 }
+
+// ============================================================
+// DETECT RECURRENCES WIZARD
+// ============================================================
+
+function DetectRecurrencesWizard({ onClose }: { onClose: () => void }) {
+  const { data: containers = [] } = useContainers()
+  const [isDetecting, setIsDetecting] = useState(false)
+  const [patterns, setPatterns] = useState<DetectedPattern[]>([])
+  const [selectedPatterns, setSelectedPatterns] = useState<Set<number>>(new Set())
+  const [hasDetected, setHasDetected] = useState(false)
+  const [isCreating, setIsCreating] = useState(false)
+  const [createResult, setCreateResult] = useState<{ created: number } | null>(null)
+  const [containerId, setContainerId] = useState('')
+  const [minConfidence, setMinConfidence] = useState(50)
+
+  const detect = useCallback(async () => {
+    setIsDetecting(true)
+    try {
+      const params: Record<string, unknown> = { minOccurrences: 3 }
+      if (containerId) params.containerId = containerId
+      const result = await recurrencesApi.detect(params as never)
+      setPatterns(result.patterns)
+      // Auto-select patterns above threshold
+      setSelectedPatterns(new Set(
+        result.patterns
+          .filter(p => p.confidence >= minConfidence)
+          .map((_, i) => i)
+      ))
+      setHasDetected(true)
+    } catch (err) {
+      console.error('Detection failed:', err)
+    } finally {
+      setIsDetecting(false)
+    }
+  }, [containerId, minConfidence])
+
+  const createSelected = useCallback(async () => {
+    if (selectedPatterns.size === 0) return
+    setIsCreating(true)
+    try {
+      const selected = [...selectedPatterns].map(i => patterns[i])
+      const recurrences = selected.map(p => ({
+        description: p.description,
+        frequency: p.frequency,
+        dayOfMonth: p.dayOfMonth,
+        dayOfWeek: p.dayOfWeek,
+        amount: p.medianAmount.toFixed(4),
+        amountIsEstimate: p.amountIsEstimate,
+        currency: 'EUR',
+        containerId: p.containerId,
+        counterpartyId: p.counterpartyId,
+        type: p.type,
+        startDate: new Date().toISOString().slice(0, 10),
+        transactionIds: p.transactionIds,
+      }))
+      const result = await recurrencesApi.createBatch(recurrences)
+      setCreateResult({ created: result.created })
+    } catch (err) {
+      console.error('Creation failed:', err)
+    } finally {
+      setIsCreating(false)
+    }
+  }, [selectedPatterns, patterns])
+
+  const filteredPatterns = patterns.filter(p => p.confidence >= minConfidence)
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 sticky top-0 bg-zinc-900 z-10">
+          <div className="flex items-center gap-2">
+            <Wand2 className="h-5 w-5 text-purple-400" />
+            <h2 className="text-lg font-semibold text-zinc-100">Rileva Ricorrenze Automaticamente</h2>
+          </div>
+          <button className="rounded-md p-1 text-zinc-400 hover:text-zinc-200" onClick={onClose}>
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-6">
+          {/* Success state */}
+          {createResult && (
+            <div className="text-center py-8">
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-energy-500/15">
+                <Check className="h-8 w-8 text-energy-400" />
+              </div>
+              <h3 className="mt-4 text-xl font-bold text-zinc-100">
+                {createResult.created} ricorrenze create
+              </h3>
+              <p className="mt-2 text-sm text-zinc-400">
+                Le transazioni storiche sono state collegate alle nuove ricorrenze.
+              </p>
+              <button
+                onClick={onClose}
+                className="mt-6 rounded-lg bg-energy-500 px-6 py-2.5 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors"
+              >
+                Chiudi
+              </button>
+            </div>
+          )}
+
+          {/* Detection phase */}
+          {!createResult && (
+            <>
+              {/* Filters */}
+              <div className="flex items-end gap-4">
+                <div className="flex-1">
+                  <label className="block text-xs text-zinc-500 mb-1">Contenitore (opzionale)</label>
+                  <select
+                    value={containerId}
+                    onChange={(e) => setContainerId(e.target.value)}
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none"
+                  >
+                    <option value="">Tutti i contenitori</option>
+                    {containers.filter(c => c.isActive).map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="w-40">
+                  <label className="block text-xs text-zinc-500 mb-1">Confidenza minima</label>
+                  <select
+                    value={minConfidence}
+                    onChange={(e) => {
+                      setMinConfidence(parseInt(e.target.value))
+                      if (hasDetected) {
+                        setSelectedPatterns(new Set(
+                          patterns
+                            .filter(p => p.confidence >= parseInt(e.target.value))
+                            .map((_, i) => i)
+                        ))
+                      }
+                    }}
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none"
+                  >
+                    <option value={40}>40%</option>
+                    <option value={50}>50%</option>
+                    <option value={60}>60%</option>
+                    <option value={70}>70%</option>
+                    <option value={80}>80%</option>
+                  </select>
+                </div>
+                <button
+                  onClick={detect}
+                  disabled={isDetecting}
+                  className="flex items-center gap-2 rounded-lg bg-purple-500 px-5 py-2 text-sm font-medium text-white hover:bg-purple-400 transition-colors disabled:opacity-50"
+                >
+                  {isDetecting ? (
+                    <><Loader2 className="h-4 w-4 animate-spin" /> Analisi...</>
+                  ) : (
+                    <><Wand2 className="h-4 w-4" /> {hasDetected ? 'Rileva di nuovo' : 'Analizza transazioni'}</>
+                  )}
+                </button>
+              </div>
+
+              {/* Results */}
+              {hasDetected && (
+                <>
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-zinc-400">
+                      <span className="font-semibold text-zinc-200">{filteredPatterns.length}</span> pattern rilevati
+                      {filteredPatterns.length !== patterns.length && (
+                        <span className="text-zinc-500"> ({patterns.length} totali, filtro confidenza ≥{minConfidence}%)</span>
+                      )}
+                    </p>
+                    {filteredPatterns.length > 0 && (
+                      <button
+                        onClick={() => {
+                          if (selectedPatterns.size === filteredPatterns.length) {
+                            setSelectedPatterns(new Set())
+                          } else {
+                            setSelectedPatterns(new Set(filteredPatterns.map((_, i) => patterns.indexOf(filteredPatterns[i]))))
+                          }
+                        }}
+                        className="text-xs text-purple-400 hover:text-purple-300"
+                      >
+                        {selectedPatterns.size === filteredPatterns.length ? 'Deseleziona tutti' : 'Seleziona tutti'}
+                      </button>
+                    )}
+                  </div>
+
+                  {filteredPatterns.length === 0 ? (
+                    <div className="text-center py-8 text-zinc-500">
+                      <Repeat className="mx-auto h-8 w-8 mb-2" />
+                      <p className="text-sm">Nessun pattern rilevato con confidenza ≥{minConfidence}%</p>
+                      <p className="text-xs mt-1">Prova ad abbassare la soglia di confidenza o importare piu' transazioni</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-[45vh] overflow-y-auto">
+                      {filteredPatterns.map((pattern) => {
+                        const idx = patterns.indexOf(pattern)
+                        const isSelected = selectedPatterns.has(idx)
+                        const amount = pattern.medianAmount
+                        return (
+                          <label
+                            key={idx}
+                            className={cn(
+                              'flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition-colors',
+                              isSelected
+                                ? 'border-purple-500/50 bg-purple-500/5'
+                                : 'border-zinc-700 bg-zinc-800/50 hover:border-zinc-600',
+                            )}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => {
+                                const next = new Set(selectedPatterns)
+                                if (next.has(idx)) next.delete(idx)
+                                else next.add(idx)
+                                setSelectedPatterns(next)
+                              }}
+                              className="mt-1 h-4 w-4 rounded border-zinc-600 bg-zinc-800 text-purple-500 focus:ring-purple-500"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <p className="text-sm font-medium text-zinc-200 truncate">{pattern.description}</p>
+                                <Badge
+                                  variant={pattern.confidence >= 80 ? 'success' : pattern.confidence >= 60 ? 'warning' : 'default'}
+                                  size="sm"
+                                >
+                                  {pattern.confidence}%
+                                </Badge>
+                                {pattern.amountIsEstimate && (
+                                  <span className="text-[10px] text-amber-400">~stima</span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-3 mt-1 flex-wrap">
+                                <span className="text-xs text-zinc-500">
+                                  {frequencyLabels[pattern.frequency as Frequency] || pattern.frequency}
+                                  {pattern.dayOfMonth && ` · g.${pattern.dayOfMonth}`}
+                                  {pattern.dayOfWeek != null && ` · ${['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab'][pattern.dayOfWeek]}`}
+                                </span>
+                                <span className="text-xs text-zinc-600">|</span>
+                                <span className="text-xs text-zinc-500">{pattern.containerName || 'N/A'}</span>
+                                {pattern.counterpartyName && (
+                                  <>
+                                    <span className="text-xs text-zinc-600">|</span>
+                                    <span className="text-xs text-zinc-500">{pattern.counterpartyName}</span>
+                                  </>
+                                )}
+                                <span className="text-xs text-zinc-600">|</span>
+                                <span className="text-xs text-zinc-500">{pattern.occurrences} occorrenze</span>
+                                {pattern.amountVariance > 0 && (
+                                  <>
+                                    <span className="text-xs text-zinc-600">|</span>
+                                    <span className="text-xs text-zinc-500">CV {pattern.amountVariance}%</span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                            <div className="shrink-0 text-right">
+                              <p className={`text-sm font-semibold ${
+                                amount > 0 ? 'text-emerald-400' : 'text-red-400'
+                              }`}>
+                                {amount > 0 ? '+' : ''}{formatCurrency(amount)}
+                              </p>
+                              <p className="text-[10px] text-zinc-500">
+                                {formatCurrency(getMonthlyImpact(amount, pattern.frequency))}/mese
+                              </p>
+                            </div>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Footer */}
+        {hasDetected && !createResult && filteredPatterns.length > 0 && (
+          <div className="flex items-center justify-between px-6 py-4 border-t border-zinc-800 sticky bottom-0 bg-zinc-900">
+            <p className="text-sm text-zinc-400">
+              {selectedPatterns.size} selezionate
+            </p>
+            <div className="flex gap-3">
+              <button
+                className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-700 transition-colors"
+                onClick={onClose}
+              >
+                Annulla
+              </button>
+              <button
+                disabled={selectedPatterns.size === 0 || isCreating}
+                onClick={createSelected}
+                className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors disabled:opacity-50"
+              >
+                {isCreating ? (
+                  <><Loader2 className="h-4 w-4 animate-spin" /> Creazione...</>
+                ) : (
+                  <>Crea {selectedPatterns.size} ricorrenze</>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ============================================================
+// RECURRENCE MODAL
+// ============================================================
 
 function RecurrenceModal({
   recurrence,
@@ -477,11 +760,11 @@ function RecurrenceModal({
   onClose,
   onSave,
 }: {
-  recurrence: MockRecurrence | null
+  recurrence: Recurrence | null
   containers: Array<{ id: string; name: string; isActive: boolean }>
   counterparties: Array<{ id: string; name: string }>
   onClose: () => void
-  onSave: (data: Omit<MockRecurrence, 'id' | 'isActive'>) => void
+  onSave: (data: Partial<Recurrence>) => void
 }) {
   const [form, setForm] = useState({
     description: recurrence?.description || '',
@@ -494,13 +777,12 @@ function RecurrenceModal({
     currency: recurrence?.currency || 'EUR',
     containerId: recurrence?.containerId || '',
     counterpartyId: recurrence?.counterpartyId || '',
-    type: recurrence?.type || ('expense' as TransactionType),
+    type: (recurrence?.type || 'expense') as TransactionType,
     sharedWithSubjectId: recurrence?.sharedWithSubjectId || '',
     sharePercentage: recurrence?.sharePercentage || '',
     startDate: recurrence?.startDate || new Date().toISOString().split('T')[0],
     endDate: recurrence?.endDate || '',
     reminderDaysBefore: recurrence?.reminderDaysBefore,
-    tags: recurrence?.tags || [],
   })
 
   function handleSave() {
@@ -522,7 +804,6 @@ function RecurrenceModal({
       startDate: form.startDate,
       endDate: form.endDate || undefined,
       reminderDaysBefore: form.reminderDaysBefore,
-      tags: form.tags,
     })
   }
 
@@ -554,7 +835,6 @@ function RecurrenceModal({
             ))}
           </div>
 
-          {/* Description */}
           <div>
             <label className="block text-xs text-zinc-500 mb-1">Descrizione *</label>
             <input
@@ -566,7 +846,6 @@ function RecurrenceModal({
             />
           </div>
 
-          {/* Amount + Currency */}
           <div className="grid grid-cols-3 gap-3">
             <div className="col-span-2">
               <label className="block text-xs text-zinc-500 mb-1">Importo *</label>
@@ -603,7 +882,6 @@ function RecurrenceModal({
             Importo stimato (variabile)
           </label>
 
-          {/* Container */}
           <div>
             <label className="block text-xs text-zinc-500 mb-1">Contenitore *</label>
             <select
@@ -618,7 +896,6 @@ function RecurrenceModal({
             </select>
           </div>
 
-          {/* Counterparty */}
           <div>
             <label className="block text-xs text-zinc-500 mb-1">Controparte</label>
             <select
@@ -633,7 +910,6 @@ function RecurrenceModal({
             </select>
           </div>
 
-          {/* Frequency + Day */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-zinc-500 mb-1">Frequenza</label>
@@ -684,7 +960,6 @@ function RecurrenceModal({
             Solo giorni lavorativi
           </label>
 
-          {/* Start/End date */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-zinc-500 mb-1">Data Inizio</label>
@@ -706,7 +981,6 @@ function RecurrenceModal({
             </div>
           </div>
 
-          {/* Reminder */}
           <div>
             <label className="block text-xs text-zinc-500 mb-1">Promemoria (giorni prima)</label>
             <input

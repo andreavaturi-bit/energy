@@ -41,6 +41,37 @@ async function handleSubjects(
     return ok(res, data)
   }
 
+  // POST-based actions (update/delete via POST to avoid Vercel multi-segment path 404)
+  const bodyAction = (req.body as Record<string, unknown>)?._action
+
+  if (method === 'POST' && bodyAction === 'update') {
+    const b = req.body || {}
+    const subjectId = b.id as string
+    if (!subjectId) return badRequest(res, 'id è obbligatorio')
+    const update: Record<string, unknown> = { updated_at: new Date().toISOString() }
+    if (b.type !== undefined) update.type = b.type
+    if (b.name !== undefined) update.name = b.name
+    if (b.legalForm !== undefined) update.legal_form = b.legalForm
+    if (b.taxId !== undefined) update.tax_id = b.taxId
+    if (b.country !== undefined) update.country = b.country
+    if (b.role !== undefined) update.role = b.role
+    if (b.parentSubjectId !== undefined) update.parent_subject_id = b.parentSubjectId
+    if (b.notes !== undefined) update.notes = b.notes
+    if (b.isActive !== undefined) update.is_active = b.isActive
+
+    const { data, error } = await sb.from('subjects').update(update).eq('id', subjectId).select().single()
+    if (error || !data) return notFound(res, 'Soggetto non trovato')
+    return ok(res, data)
+  }
+
+  if (method === 'POST' && bodyAction === 'delete') {
+    const subjectId = (req.body as Record<string, unknown>)?.id as string
+    if (!subjectId) return badRequest(res, 'id è obbligatorio')
+    const { data, error } = await sb.from('subjects').delete().eq('id', subjectId).select('id').single()
+    if (error || !data) return notFound(res, 'Soggetto non trovato')
+    return ok(res, { deleted: true, id: subjectId })
+  }
+
   if (method === 'POST') {
     const b = req.body || {}
     if (!b.name || !b.type) return badRequest(res, 'name e type sono obbligatori')
@@ -76,12 +107,7 @@ async function handleSubjects(
     if (b.notes !== undefined) update.notes = b.notes
     if (b.isActive !== undefined) update.is_active = b.isActive
 
-    const { data, error } = await sb
-      .from('subjects')
-      .update(update)
-      .eq('id', id)
-      .select()
-      .single()
+    const { data, error } = await sb.from('subjects').update(update).eq('id', id).select().single()
     if (error || !data) return notFound(res, 'Soggetto non trovato')
     return ok(res, data)
   }
@@ -153,6 +179,46 @@ async function handleContainers(
     return ok(res, { ...rest, subject_name: subjects?.name ?? null })
   }
 
+  const bodyAction = (req.body as Record<string, unknown>)?._action
+
+  if (method === 'POST' && bodyAction === 'update') {
+    const b = req.body || {}
+    const cId = b.id as string
+    if (!cId) return badRequest(res, 'id è obbligatorio')
+    const update: Record<string, unknown> = { updated_at: new Date().toISOString() }
+    if (b.subjectId !== undefined) update.subject_id = b.subjectId
+    if (b.name !== undefined) update.name = b.name
+    if (b.type !== undefined) update.type = b.type
+    if (b.provider !== undefined) update.provider = b.provider
+    if (b.currency !== undefined) update.currency = b.currency
+    if (b.isMultiCurrency !== undefined) update.is_multi_currency = b.isMultiCurrency
+    if (b.initialBalance !== undefined) update.initial_balance = b.initialBalance
+    if (b.billingDay !== undefined) update.billing_day = b.billingDay
+    if (b.linkedContainerId !== undefined) update.linked_container_id = b.linkedContainerId
+    if (b.icon !== undefined) update.icon = b.icon
+    if (b.color !== undefined) update.color = b.color
+    if (b.sortOrder !== undefined) update.sort_order = b.sortOrder
+    if (b.isPinned !== undefined) update.is_pinned = b.isPinned
+    if (b.isActive !== undefined) update.is_active = b.isActive
+    if (b.notes !== undefined) update.notes = b.notes
+
+    const { data, error } = await sb.from('containers').update(update).eq('id', cId).select().single()
+    if (error || !data) return notFound(res, 'Contenitore non trovato')
+    return ok(res, data)
+  }
+
+  if (method === 'POST' && bodyAction === 'delete') {
+    const cId = (req.body as Record<string, unknown>)?.id as string
+    if (!cId) return badRequest(res, 'id è obbligatorio')
+    const { count } = await sb.from('transactions').select('id', { count: 'exact', head: true }).eq('container_id', cId)
+    if (count && count > 0) {
+      return badRequest(res, `Impossibile eliminare: ci sono ${count} transazioni collegate a questo contenitore.`)
+    }
+    const { data, error } = await sb.from('containers').delete().eq('id', cId).select('id').single()
+    if (error || !data) return notFound(res, 'Contenitore non trovato')
+    return ok(res, { deleted: true, id: cId })
+  }
+
   if (method === 'POST') {
     const b = req.body || {}
     if (!b.name || !b.type || !b.subjectId) return badRequest(res, 'name, type e subjectId sono obbligatori')
@@ -202,22 +268,13 @@ async function handleContainers(
     if (b.isActive !== undefined) update.is_active = b.isActive
     if (b.notes !== undefined) update.notes = b.notes
 
-    const { data, error } = await sb
-      .from('containers')
-      .update(update)
-      .eq('id', id)
-      .select()
-      .single()
+    const { data, error } = await sb.from('containers').update(update).eq('id', id).select().single()
     if (error || !data) return notFound(res, 'Contenitore non trovato')
     return ok(res, data)
   }
 
   if (method === 'DELETE' && id) {
-    // Check for linked transactions first
-    const { count } = await sb
-      .from('transactions')
-      .select('id', { count: 'exact', head: true })
-      .eq('container_id', id)
+    const { count } = await sb.from('transactions').select('id', { count: 'exact', head: true }).eq('container_id', id)
     if (count && count > 0) {
       return badRequest(res, `Impossibile eliminare: ci sono ${count} transazioni collegate a questo contenitore.`)
     }
@@ -253,6 +310,32 @@ async function handleCounterparties(
     return ok(res, data)
   }
 
+  const bodyAction = (req.body as Record<string, unknown>)?._action
+
+  if (method === 'POST' && bodyAction === 'update') {
+    const b = req.body || {}
+    const cpId = b.id as string
+    if (!cpId) return badRequest(res, 'id è obbligatorio')
+    const update: Record<string, unknown> = { updated_at: new Date().toISOString() }
+    if (b.name !== undefined) update.name = b.name
+    if (b.type !== undefined) update.type = b.type
+    if (b.defaultCategory !== undefined) update.default_category = b.defaultCategory
+    if (b.notes !== undefined) update.notes = b.notes
+    if (b.isActive !== undefined) update.is_active = b.isActive
+
+    const { data, error } = await sb.from('counterparties').update(update).eq('id', cpId).select().single()
+    if (error || !data) return notFound(res, 'Controparte non trovata')
+    return ok(res, data)
+  }
+
+  if (method === 'POST' && bodyAction === 'delete') {
+    const cpId = (req.body as Record<string, unknown>)?.id as string
+    if (!cpId) return badRequest(res, 'id è obbligatorio')
+    const { data, error } = await sb.from('counterparties').delete().eq('id', cpId).select('id').single()
+    if (error || !data) return notFound(res, 'Controparte non trovata')
+    return ok(res, { deleted: true, id: cpId })
+  }
+
   if (method === 'POST') {
     const b = req.body || {}
     if (!b.name) return badRequest(res, 'name è obbligatorio')
@@ -280,12 +363,7 @@ async function handleCounterparties(
     if (b.notes !== undefined) update.notes = b.notes
     if (b.isActive !== undefined) update.is_active = b.isActive
 
-    const { data, error } = await sb
-      .from('counterparties')
-      .update(update)
-      .eq('id', id)
-      .select()
-      .single()
+    const { data, error } = await sb.from('counterparties').update(update).eq('id', id).select().single()
     if (error || !data) return notFound(res, 'Controparte non trovata')
     return ok(res, data)
   }
@@ -323,6 +401,33 @@ async function handleTags(
     return ok(res, data)
   }
 
+  const bodyAction = (req.body as Record<string, unknown>)?._action
+
+  if (method === 'POST' && bodyAction === 'update') {
+    const b = req.body || {}
+    const tagId = b.id as string
+    if (!tagId) return badRequest(res, 'id è obbligatorio')
+    const update: Record<string, unknown> = {}
+    if (b.name !== undefined) update.name = b.name
+    if (b.parentId !== undefined) update.parent_id = b.parentId
+    if (b.type !== undefined) update.type = b.type
+    if (b.color !== undefined) update.color = b.color
+    if (b.icon !== undefined) update.icon = b.icon
+    if (b.isActive !== undefined) update.is_active = b.isActive
+
+    const { data, error } = await sb.from('tags').update(update).eq('id', tagId).select().single()
+    if (error || !data) return notFound(res, 'Tag non trovato')
+    return ok(res, data)
+  }
+
+  if (method === 'POST' && bodyAction === 'delete') {
+    const tagId = (req.body as Record<string, unknown>)?.id as string
+    if (!tagId) return badRequest(res, 'id è obbligatorio')
+    const { data, error } = await sb.from('tags').delete().eq('id', tagId).select('id').single()
+    if (error || !data) return notFound(res, 'Tag non trovato')
+    return ok(res, { deleted: true, id: tagId })
+  }
+
   if (method === 'POST') {
     const b = req.body || {}
     if (!b.name || !b.type) return badRequest(res, 'name e type sono obbligatori')
@@ -352,12 +457,7 @@ async function handleTags(
     if (b.icon !== undefined) update.icon = b.icon
     if (b.isActive !== undefined) update.is_active = b.isActive
 
-    const { data, error } = await sb
-      .from('tags')
-      .update(update)
-      .eq('id', id)
-      .select()
-      .single()
+    const { data, error } = await sb.from('tags').update(update).eq('id', id).select().single()
     if (error || !data) return notFound(res, 'Tag non trovato')
     return ok(res, data)
   }
@@ -400,6 +500,7 @@ async function handleTransactions(
       )
 
     if (param('containerId')) query = query.eq('container_id', param('containerId')!)
+    if (param('counterpartyId')) query = query.eq('counterparty_id', param('counterpartyId')!)
     if (param('type')) query = query.eq('type', param('type')!)
     if (param('status')) query = query.eq('status', param('status')!)
     if (param('dateFrom')) query = query.gte('date', param('dateFrom')!)
@@ -409,12 +510,43 @@ async function handleTransactions(
       query = query.or(`description.ilike.%${s}%,notes.ilike.%${s}%`)
     }
 
+    // Tag filter: if tagId is specified, filter transactions that have that tag
+    const tagIdFilter = param('tagId')
+    if (tagIdFilter) {
+      const { data: taggedTxIds } = await sb
+        .from('transaction_tags')
+        .select('transaction_id')
+        .eq('tag_id', tagIdFilter)
+      const txIds = (taggedTxIds || []).map((r: Record<string, unknown>) => r.transaction_id as string)
+      if (txIds.length === 0) {
+        return ok(res, { rows: [], total: 0, limit, offset })
+      }
+      query = query.in('id', txIds)
+    }
+
     const { data, error, count } = await query
       .order('date', { ascending: false })
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1)
 
     if (error) throw error
+
+    // Fetch tags for all returned transactions in one query
+    const txIds = (data || []).map((r: Record<string, unknown>) => r.id as string)
+    let tagsByTxId = new Map<string, Array<Record<string, unknown>>>()
+    if (txIds.length > 0) {
+      const { data: allTagRows } = await sb
+        .from('transaction_tags')
+        .select('transaction_id, tags(id, name, type, color)')
+        .in('transaction_id', txIds)
+      if (allTagRows) {
+        for (const row of allTagRows as Array<Record<string, unknown>>) {
+          const tid = row.transaction_id as string
+          if (!tagsByTxId.has(tid)) tagsByTxId.set(tid, [])
+          if (row.tags) tagsByTxId.get(tid)!.push(row.tags as Record<string, unknown>)
+        }
+      }
+    }
 
     // Flatten joined objects
     const rows = (data || []).map((r: Record<string, unknown>) => {
@@ -427,6 +559,7 @@ async function handleTransactions(
       row.container_currency = containers?.currency ?? null
       row.counterparty_name = counterparties?.name ?? null
       row.shared_with_name = subjects?.name ?? null
+      row.tags = tagsByTxId.get(row.id as string) || []
       delete row.containers
       delete row.counterparties
       delete row.subjects
@@ -469,6 +602,487 @@ async function handleTransactions(
     return ok(res, { ...row, tags })
   }
 
+  // POST /transactions?action=batch — bulk import (chunked, with dedup)
+  const params = (req.query || {}) as Record<string, string | string[]>
+  const actionParam = Array.isArray(params.action) ? params.action[0] : params.action
+
+  // POST /transactions?action=check-hashes — check which hashes already exist in DB
+  if (method === 'POST' && actionParam === 'check-hashes') {
+    const b = req.body || {}
+    const containerId = b.containerId as string
+    const hashes = b.hashes as string[]
+    if (!containerId || !Array.isArray(hashes) || hashes.length === 0) {
+      return badRequest(res, 'containerId e hashes[] sono obbligatori')
+    }
+
+    // Query in chunks of 500 to avoid query size limits
+    const HASH_CHUNK = 500
+    const existingHashes: string[] = []
+    for (let i = 0; i < hashes.length; i += HASH_CHUNK) {
+      const chunk = hashes.slice(i, i + HASH_CHUNK)
+      const { data, error } = await sb
+        .from('transactions')
+        .select('external_hash')
+        .eq('container_id', containerId)
+        .in('external_hash', chunk)
+      if (error) throw error
+      if (data) {
+        existingHashes.push(...data.map((r: { external_hash: string }) => r.external_hash))
+      }
+    }
+
+    return ok(res, { existingHashes })
+  }
+
+  // POST /transactions?action=find-matches — find manual transactions matching imported ones
+  if (method === 'POST' && actionParam === 'find-matches') {
+    const b = req.body || {}
+    const containerId = b.containerId as string
+    const candidates = b.candidates as Array<{ date: string; amount: number; description: string }>
+    if (!containerId || !Array.isArray(candidates) || candidates.length === 0) {
+      return badRequest(res, 'containerId e candidates[] sono obbligatori')
+    }
+
+    // Find manual transactions in this container within ±5 days of any candidate date
+    const allDates = candidates.map(c => c.date)
+    const minDate = allDates.sort()[0]
+    const maxDate = allDates.sort().reverse()[0]
+
+    // Extend range by 5 days
+    const fromDate = new Date(minDate)
+    fromDate.setDate(fromDate.getDate() - 5)
+    const toDate = new Date(maxDate)
+    toDate.setDate(toDate.getDate() + 5)
+
+    const { data: manualTxs, error } = await sb
+      .from('transactions')
+      .select('id, date, description, amount, currency, type, status, source, counterparty_id, container_id')
+      .eq('container_id', containerId)
+      .eq('source', 'manual')
+      .neq('status', 'cancelled')
+      .gte('date', fromDate.toISOString().slice(0, 10))
+      .lte('date', toDate.toISOString().slice(0, 10))
+
+    if (error) throw error
+
+    // Return manual transactions for client-side matching
+    return ok(res, { manualTransactions: manualTxs || [] })
+  }
+
+  // POST /transactions?action=reconcile — merge a manual transaction with an imported one
+  if (method === 'POST' && actionParam === 'reconcile') {
+    const b = req.body || {}
+    const keepId = b.keepId as string
+    const removeId = b.removeId as string
+    if (!keepId || !removeId) return badRequest(res, 'keepId e removeId sono obbligatori')
+
+    // Fetch the transaction to remove (to grab its external_hash/external_id)
+    const { data: removeTx, error: fetchErr } = await sb
+      .from('transactions')
+      .select('external_hash, external_id, value_date')
+      .eq('id', removeId)
+      .single()
+    if (fetchErr || !removeTx) return notFound(res, 'Transazione da rimuovere non trovata')
+
+    // Update the kept transaction: copy dedup fields so future imports recognize it
+    const keepUpdate: Record<string, unknown> = { updated_at: new Date().toISOString() }
+    if (removeTx.external_hash) keepUpdate.external_hash = removeTx.external_hash
+    if (removeTx.external_id) keepUpdate.external_id = removeTx.external_id
+    if (removeTx.value_date) keepUpdate.value_date = removeTx.value_date
+
+    const { error: updateErr } = await sb.from('transactions').update(keepUpdate).eq('id', keepId)
+    if (updateErr) throw updateErr
+
+    // Delete the removed transaction
+    const { error: deleteErr } = await sb.from('transactions').delete().eq('id', removeId)
+    if (deleteErr) throw deleteErr
+
+    return ok(res, { reconciled: true, keptId: keepId, removedId: removeId })
+  }
+
+  // POST /transactions?action=reconcile-bulk — batch reconcile multiple pairs
+  if (method === 'POST' && actionParam === 'reconcile-bulk') {
+    const b = req.body || {}
+    const pairs = b.pairs as Array<{ keepId: string; removeId: string }>
+    if (!Array.isArray(pairs) || pairs.length === 0) {
+      return badRequest(res, 'pairs[] è obbligatorio')
+    }
+
+    let reconciledCount = 0
+    const errors: string[] = []
+
+    for (const pair of pairs) {
+      const { data: removeTx } = await sb
+        .from('transactions')
+        .select('external_hash, external_id, value_date')
+        .eq('id', pair.removeId)
+        .single()
+
+      if (!removeTx) {
+        errors.push(`Transazione ${pair.removeId} non trovata`)
+        continue
+      }
+
+      const keepUpdate: Record<string, unknown> = { updated_at: new Date().toISOString() }
+      if (removeTx.external_hash) keepUpdate.external_hash = removeTx.external_hash
+      if (removeTx.external_id) keepUpdate.external_id = removeTx.external_id
+      if (removeTx.value_date) keepUpdate.value_date = removeTx.value_date
+
+      await sb.from('transactions').update(keepUpdate).eq('id', pair.keepId)
+      await sb.from('transactions').delete().eq('id', pair.removeId)
+      reconciledCount++
+    }
+
+    return ok(res, { reconciled: reconciledCount, errors: errors.length > 0 ? errors : undefined })
+  }
+
+  if (method === 'POST' && actionParam === 'batch') {
+    const items = req.body?.transactions as unknown[]
+    if (!Array.isArray(items) || items.length === 0) {
+      return badRequest(res, 'transactions array is required and must not be empty')
+    }
+
+    const rows = items.map((item: unknown) => {
+      const b = item as Record<string, unknown>
+      return {
+      date: b.date,
+      value_date: b.valueDate ?? null,
+      description: b.description ?? null,
+      notes: b.notes ?? null,
+      amount: b.amount,
+      currency: b.currency ?? 'EUR',
+      amount_eur: b.amountEur ?? null,
+      exchange_rate: b.exchangeRate ?? null,
+      container_id: b.containerId,
+      counterparty_id: b.counterpartyId ?? null,
+      type: b.type,
+      transfer_linked_id: b.transferLinkedId ?? null,
+      status: b.status ?? 'completed',
+      source: b.source ?? 'manual',
+      shared_with_subject_id: b.sharedWithSubjectId ?? null,
+      share_percentage: b.sharePercentage ?? null,
+      installment_plan_id: b.installmentPlanId ?? null,
+      installment_number: b.installmentNumber ?? null,
+      external_id: b.externalId ?? null,
+      external_hash: (b.externalHash as string) ?? null,
+    }})
+
+    // Dedup server-side: filter out rows whose external_hash already exists
+    const hashesToCheck = rows
+      .map(r => r.external_hash)
+      .filter((h): h is string => h !== null && h !== undefined)
+    let existingHashSet = new Set<string>()
+
+    if (hashesToCheck.length > 0) {
+      const containerIds = [...new Set(rows.map(r => r.container_id).filter(Boolean))]
+      for (const cid of containerIds) {
+        const containerHashes = rows
+          .filter(r => r.container_id === cid && r.external_hash)
+          .map(r => r.external_hash as string)
+        if (containerHashes.length === 0) continue
+        for (let i = 0; i < containerHashes.length; i += 500) {
+          const chunk = containerHashes.slice(i, i + 500)
+          const { data } = await sb
+            .from('transactions')
+            .select('external_hash')
+            .eq('container_id', cid)
+            .in('external_hash', chunk)
+          if (data) {
+            data.forEach((r: { external_hash: string }) => existingHashSet.add(r.external_hash))
+          }
+        }
+      }
+    }
+
+    // Filter out duplicates
+    const dedupedRows = rows.filter(r => {
+      if (r.external_hash && existingHashSet.has(r.external_hash)) return false
+      return true
+    })
+    const skippedDuplicates = rows.length - dedupedRows.length
+
+    // Insert in chunks to avoid timeouts and payload limits
+    const CHUNK_SIZE = 50
+    let insertedCount = 0
+    const errors: string[] = []
+
+    for (let i = 0; i < dedupedRows.length; i += CHUNK_SIZE) {
+      const chunk = dedupedRows.slice(i, i + CHUNK_SIZE)
+      const { error } = await sb
+        .from('transactions')
+        .insert(chunk)
+      if (error) {
+        errors.push(`Chunk ${Math.floor(i / CHUNK_SIZE) + 1}: ${error.message}`)
+      } else {
+        insertedCount += chunk.length
+      }
+    }
+
+    if (errors.length > 0 && insertedCount === 0 && dedupedRows.length > 0) {
+      return res.status(500).json({
+        error: 'Import failed',
+        message: errors.join('; '),
+        data: { inserted: 0, failed: dedupedRows.length, skippedDuplicates, errors },
+      })
+    }
+
+    return created(res, {
+      inserted: insertedCount,
+      failed: dedupedRows.length - insertedCount,
+      skippedDuplicates,
+      total: rows.length,
+      errors: errors.length > 0 ? errors : undefined,
+    })
+  }
+
+  // POST transfer — create a linked transfer pair
+  // Detect via query ?action=transfer OR body _action:'transfer'
+  const bodyAction = (req.body as Record<string, unknown>)?._action
+  if (method === 'POST' && (actionParam === 'transfer' || bodyAction === 'transfer')) {
+    const b = req.body || {}
+    if (!b.date || !b.amount || !b.fromContainerId || !b.toContainerId) {
+      return badRequest(res, 'date, amount, fromContainerId e toContainerId sono obbligatori')
+    }
+
+    const absAmount = Math.abs(parseFloat(b.amount)).toFixed(4)
+
+    // 1. Create transfer_out (negative amount, source container)
+    const { data: outTx, error: outErr } = await sb
+      .from('transactions')
+      .insert({
+        date: b.date,
+        description: b.description ?? null,
+        notes: b.notes ?? null,
+        amount: `-${absAmount}`,
+        currency: b.currency ?? 'EUR',
+        container_id: b.fromContainerId,
+        type: 'transfer_out',
+        status: b.status ?? 'completed',
+        source: b.source ?? 'manual',
+      })
+      .select()
+      .single()
+    if (outErr) throw outErr
+
+    // 2. Create transfer_in (positive amount, destination container)
+    const { data: inTx, error: inErr } = await sb
+      .from('transactions')
+      .insert({
+        date: b.date,
+        description: b.description ?? null,
+        notes: b.notes ?? null,
+        amount: absAmount,
+        currency: b.currency ?? 'EUR',
+        container_id: b.toContainerId,
+        type: 'transfer_in',
+        status: b.status ?? 'completed',
+        source: b.source ?? 'manual',
+      })
+      .select()
+      .single()
+    if (inErr) throw inErr
+
+    // 3. Cross-link via transfer_linked_id
+    await sb.from('transactions').update({ transfer_linked_id: inTx.id }).eq('id', outTx.id)
+    await sb.from('transactions').update({ transfer_linked_id: outTx.id }).eq('id', inTx.id)
+
+    return created(res, {
+      transferOut: { ...outTx, transfer_linked_id: inTx.id },
+      transferIn: { ...inTx, transfer_linked_id: outTx.id },
+    })
+  }
+
+  // POST update-transfer — update both sides of a transfer pair
+  // Uses POST instead of PUT to avoid Vercel routing issues with multi-segment paths
+  if (method === 'POST' && bodyAction === 'update-transfer') {
+    const b = req.body || {}
+    const txId = b.id as string
+    if (!txId || !b.fromContainerId || !b.toContainerId) {
+      return badRequest(res, 'id, fromContainerId e toContainerId sono obbligatori')
+    }
+
+    const now = new Date().toISOString()
+    const absAmount = b.amount ? Math.abs(parseFloat(b.amount)).toFixed(4) : undefined
+
+    // Fetch the existing transaction to find its linked pair
+    const { data: existingTx, error: fetchErr } = await sb
+      .from('transactions')
+      .select('id, type, transfer_linked_id')
+      .eq('id', txId)
+      .single()
+    if (fetchErr || !existingTx) return notFound(res, 'Transazione non trovata')
+
+    // Determine which side is transfer_out and which is transfer_in
+    let outId: string | null = null
+    let inId: string | null = null
+    if (existingTx.type === 'transfer_out') {
+      outId = txId
+      inId = existingTx.transfer_linked_id
+    } else if (existingTx.type === 'transfer_in') {
+      inId = txId
+      outId = existingTx.transfer_linked_id
+    } else {
+      // Converting a non-transfer to transfer: this becomes transfer_out
+      outId = txId
+    }
+
+    // Build common fields
+    const commonFields: Record<string, unknown> = { updated_at: now }
+    if (b.date !== undefined) commonFields.date = b.date
+    if (b.description !== undefined) commonFields.description = b.description
+    if (b.currency !== undefined) commonFields.currency = b.currency
+    if (b.status !== undefined) commonFields.status = b.status
+    if (b.notes !== undefined) commonFields.notes = b.notes
+
+    // Update transfer_out side
+    if (outId) {
+      const outUpdate = {
+        ...commonFields,
+        container_id: b.fromContainerId,
+        type: 'transfer_out',
+        ...(absAmount ? { amount: `-${absAmount}` } : {}),
+      }
+      const { error } = await sb.from('transactions').update(outUpdate).eq('id', outId)
+      if (error) throw error
+    }
+
+    // Update or create transfer_in side
+    if (inId) {
+      const inUpdate = {
+        ...commonFields,
+        container_id: b.toContainerId,
+        type: 'transfer_in',
+        ...(absAmount ? { amount: absAmount } : {}),
+      }
+      const { error } = await sb.from('transactions').update(inUpdate).eq('id', inId)
+      if (error) throw error
+    } else {
+      // No linked transaction exists — create the transfer_in side
+      const inInsert: Record<string, unknown> = {
+        date: b.date ?? null,
+        description: b.description ?? null,
+        notes: b.notes ?? null,
+        amount: absAmount ?? '0',
+        currency: b.currency ?? 'EUR',
+        container_id: b.toContainerId,
+        type: 'transfer_in',
+        status: b.status ?? 'completed',
+        source: 'manual',
+        transfer_linked_id: outId,
+      }
+      // Fill date from the existing out-side if not provided
+      if (!inInsert.date && outId) {
+        const { data: outData } = await sb.from('transactions').select('date').eq('id', outId).single()
+        inInsert.date = outData?.date ?? new Date().toISOString().slice(0, 10)
+      }
+      const { data: newIn, error } = await sb.from('transactions').insert(inInsert).select().single()
+      if (error) throw error
+      // Link the out side to the new in side
+      await sb.from('transactions').update({ transfer_linked_id: newIn.id }).eq('id', outId!)
+    }
+
+    return ok(res, { updated: true })
+  }
+
+  // POST get-by-id — fetch a single transaction via POST to avoid multi-segment path issues
+  if (method === 'POST' && bodyAction === 'get') {
+    const txId = (req.body as Record<string, unknown>)?.id as string
+    if (!txId) return badRequest(res, 'id è obbligatorio')
+
+    const { data, error } = await sb
+      .from('transactions')
+      .select(
+        '*, containers(name, color), counterparties(name), subjects!transactions_shared_with_subject_id_subjects_id_fk(name)',
+      )
+      .eq('id', txId)
+      .single()
+    if (error || !data) return notFound(res, 'Transazione non trovata')
+
+    const { data: tagRows } = await sb
+      .from('transaction_tags')
+      .select('tags(*)')
+      .eq('transaction_id', txId)
+    const tags = (tagRows || []).map((r: Record<string, unknown>) => r.tags)
+
+    const row = { ...data } as Record<string, unknown>
+    const containers = row.containers as { name?: string; color?: string } | null
+    const counterparties = row.counterparties as { name?: string } | null
+    const subjects = row.subjects as { name?: string } | null
+    row.container_name = containers?.name ?? null
+    row.container_color = containers?.color ?? null
+    row.counterparty_name = counterparties?.name ?? null
+    row.shared_with_name = subjects?.name ?? null
+    delete row.containers
+    delete row.counterparties
+    delete row.subjects
+
+    return ok(res, { ...row, tags })
+  }
+
+  // POST update — update a transaction via POST to avoid multi-segment path issues
+  if (method === 'POST' && bodyAction === 'update') {
+    const b = req.body || {}
+    const txId = b.id as string
+    if (!txId) return badRequest(res, 'id è obbligatorio')
+
+    const update: Record<string, unknown> = { updated_at: new Date().toISOString() }
+    if (b.date !== undefined) update.date = b.date
+    if (b.valueDate !== undefined) update.value_date = b.valueDate
+    if (b.description !== undefined) update.description = b.description
+    if (b.notes !== undefined) update.notes = b.notes
+    if (b.amount !== undefined) update.amount = b.amount
+    if (b.currency !== undefined) update.currency = b.currency
+    if (b.amountEur !== undefined) update.amount_eur = b.amountEur
+    if (b.exchangeRate !== undefined) update.exchange_rate = b.exchangeRate
+    if (b.containerId !== undefined) update.container_id = b.containerId
+    if (b.counterpartyId !== undefined) update.counterparty_id = b.counterpartyId
+    if (b.type !== undefined) update.type = b.type
+    if (b.transferLinkedId !== undefined) update.transfer_linked_id = b.transferLinkedId
+    if (b.status !== undefined) update.status = b.status
+    if (b.sharedWithSubjectId !== undefined) update.shared_with_subject_id = b.sharedWithSubjectId
+    if (b.sharePercentage !== undefined) update.share_percentage = b.sharePercentage
+
+    const { data, error } = await sb
+      .from('transactions')
+      .update(update)
+      .eq('id', txId)
+      .select()
+      .single()
+    if (error || !data) return notFound(res, 'Transazione non trovata')
+
+    const tagIds = b.tagIds as string[] | undefined
+    if (tagIds !== undefined) {
+      await sb.from('transaction_tags').delete().eq('transaction_id', txId)
+      if (tagIds.length > 0) {
+        await sb.from('transaction_tags').insert(
+          tagIds.map((tagId: string) => ({ transaction_id: txId, tag_id: tagId })),
+        )
+      }
+    }
+
+    return ok(res, data)
+  }
+
+  // POST delete — delete a transaction via POST to avoid multi-segment path issues
+  if (method === 'POST' && bodyAction === 'delete') {
+    const txId = (req.body as Record<string, unknown>)?.id as string
+    if (!txId) return badRequest(res, 'id è obbligatorio')
+
+    // If this is part of a transfer pair, delete the linked side too
+    const { data: txToDelete } = await sb
+      .from('transactions')
+      .select('transfer_linked_id')
+      .eq('id', txId)
+      .single()
+    if (txToDelete?.transfer_linked_id) {
+      await sb.from('transactions').delete().eq('id', txToDelete.transfer_linked_id)
+    }
+
+    const { data, error } = await sb.from('transactions').delete().eq('id', txId).select('id').single()
+    if (error || !data) return notFound(res, 'Transazione non trovata')
+    return ok(res, { deleted: true, id: txId, linkedDeleted: !!txToDelete?.transfer_linked_id })
+  }
+
   if (method === 'POST') {
     const b = req.body || {}
     if (!b.date || !b.amount || !b.containerId || !b.type) {
@@ -497,6 +1111,7 @@ async function handleTransactions(
         installment_plan_id: b.installmentPlanId ?? null,
         installment_number: b.installmentNumber ?? null,
         external_id: b.externalId ?? null,
+        external_hash: b.externalHash ?? null,
       })
       .select()
       .single()
@@ -511,6 +1126,117 @@ async function handleTransactions(
     }
 
     return created(res, data)
+  }
+
+  // PUT transfer — update both sides of a transfer pair
+  // Detect via query ?action=transfer OR body _action:'transfer'
+  const putBodyAction = (req.body as Record<string, unknown>)?._action
+  if ((method === 'PUT' || method === 'PATCH') && id && (actionParam === 'transfer' || putBodyAction === 'transfer')) {
+    const b = req.body || {}
+    if (!b.fromContainerId || !b.toContainerId) {
+      return badRequest(res, 'fromContainerId e toContainerId sono obbligatori')
+    }
+
+    const now = new Date().toISOString()
+    const absAmount = b.amount ? Math.abs(parseFloat(b.amount)).toFixed(4) : undefined
+
+    // Fetch the existing transaction to find its linked pair
+    const { data: existingTx, error: fetchErr } = await sb
+      .from('transactions')
+      .select('id, type, transfer_linked_id')
+      .eq('id', id)
+      .single()
+    if (fetchErr || !existingTx) return notFound(res, 'Transazione non trovata')
+
+    // Determine which side is transfer_out and which is transfer_in
+    let outId: string | null = null
+    let inId: string | null = null
+    if (existingTx.type === 'transfer_out') {
+      outId = id
+      inId = existingTx.transfer_linked_id
+    } else if (existingTx.type === 'transfer_in') {
+      inId = id
+      outId = existingTx.transfer_linked_id
+    } else {
+      // Converting a non-transfer to transfer: this becomes transfer_out
+      outId = id
+    }
+
+    // Build common fields
+    const commonFields: Record<string, unknown> = { updated_at: now }
+    if (b.date !== undefined) commonFields.date = b.date
+    if (b.description !== undefined) commonFields.description = b.description
+    if (b.currency !== undefined) commonFields.currency = b.currency
+    if (b.status !== undefined) commonFields.status = b.status
+    if (b.notes !== undefined) commonFields.notes = b.notes
+
+    // Update transfer_out side
+    if (outId) {
+      const outUpdate = {
+        ...commonFields,
+        container_id: b.fromContainerId,
+        type: 'transfer_out',
+        ...(absAmount ? { amount: `-${absAmount}` } : {}),
+      }
+      const { error } = await sb.from('transactions').update(outUpdate).eq('id', outId)
+      if (error) throw error
+    }
+
+    // Update or create transfer_in side
+    if (inId) {
+      const inUpdate = {
+        ...commonFields,
+        container_id: b.toContainerId,
+        type: 'transfer_in',
+        ...(absAmount ? { amount: absAmount } : {}),
+      }
+      const { error } = await sb.from('transactions').update(inUpdate).eq('id', inId)
+      if (error) throw error
+    } else {
+      // No linked transaction exists — create the transfer_in side
+      const inInsert: Record<string, unknown> = {
+        date: b.date ?? null,
+        description: b.description ?? null,
+        notes: b.notes ?? null,
+        amount: absAmount ?? '0',
+        currency: b.currency ?? 'EUR',
+        container_id: b.toContainerId,
+        type: 'transfer_in',
+        status: b.status ?? 'completed',
+        source: 'manual',
+        transfer_linked_id: outId,
+      }
+      // Fill date from the existing out-side if not provided
+      if (!inInsert.date && outId) {
+        const { data: outData } = await sb.from('transactions').select('date').eq('id', outId).single()
+        inInsert.date = outData?.date ?? new Date().toISOString().slice(0, 10)
+      }
+      const { data: newIn, error } = await sb.from('transactions').insert(inInsert).select().single()
+      if (error) throw error
+      // Link the out side to the new in side
+      await sb.from('transactions').update({ transfer_linked_id: newIn.id }).eq('id', outId!)
+    }
+
+    // If we converted a non-transfer, create the out side link
+    if (!outId && inId) {
+      const outInsert: Record<string, unknown> = {
+        date: b.date ?? new Date().toISOString().slice(0, 10),
+        description: b.description ?? null,
+        notes: b.notes ?? null,
+        amount: absAmount ? `-${absAmount}` : '0',
+        currency: b.currency ?? 'EUR',
+        container_id: b.fromContainerId,
+        type: 'transfer_out',
+        status: b.status ?? 'completed',
+        source: 'manual',
+        transfer_linked_id: inId,
+      }
+      const { data: newOut, error } = await sb.from('transactions').insert(outInsert).select().single()
+      if (error) throw error
+      await sb.from('transactions').update({ transfer_linked_id: newOut.id }).eq('id', inId)
+    }
+
+    return ok(res, { updated: true })
   }
 
   if ((method === 'PUT' || method === 'PATCH') && id) {
@@ -555,9 +1281,19 @@ async function handleTransactions(
   }
 
   if (method === 'DELETE' && id) {
+    // If this is part of a transfer pair, delete the linked side too
+    const { data: txToDelete } = await sb
+      .from('transactions')
+      .select('transfer_linked_id')
+      .eq('id', id)
+      .single()
+    if (txToDelete?.transfer_linked_id) {
+      await sb.from('transactions').delete().eq('id', txToDelete.transfer_linked_id)
+    }
+
     const { data, error } = await sb.from('transactions').delete().eq('id', id).select('id').single()
     if (error || !data) return notFound(res, 'Transazione non trovata')
-    return ok(res, { deleted: true, id })
+    return ok(res, { deleted: true, id, linkedDeleted: !!txToDelete?.transfer_linked_id })
   }
 
   return badRequest(res, 'Metodo non supportato')
@@ -574,6 +1310,251 @@ async function handleRecurrences(
 ) {
   const sb = getSupabase()
   const method = req.method
+
+  // POST /recurrences { _action: 'detect' } — auto-detect recurring patterns from transactions
+  const bodyActionRec = (req.body as Record<string, unknown>)?._action
+  if (method === 'POST' && bodyActionRec === 'detect') {
+    const b = req.body || {}
+    const dateFrom = (b.dateFrom as string) || null
+    const dateTo = (b.dateTo as string) || null
+    const containerId = (b.containerId as string) || null
+    const minOccurrences = (b.minOccurrences as number) || 3
+
+    // Fetch completed transactions (non-transfer, non-cancelled)
+    let query = sb
+      .from('transactions')
+      .select('id, date, description, amount, currency, type, container_id, counterparty_id, source')
+      .neq('status', 'cancelled')
+      .neq('type', 'transfer_in')
+      .neq('type', 'transfer_out')
+      .order('date', { ascending: true })
+
+    if (dateFrom) query = query.gte('date', dateFrom)
+    if (dateTo) query = query.lte('date', dateTo)
+    if (containerId) query = query.eq('container_id', containerId)
+
+    const { data: transactions, error } = await query
+    if (error) throw error
+
+    // Fetch container and counterparty names for display
+    const { data: allContainers } = await sb.from('containers').select('id, name')
+    const { data: allCounterparties } = await sb.from('counterparties').select('id, name')
+    const containerMap = new Map((allContainers || []).map((c: { id: string; name: string }) => [c.id, c.name]))
+    const counterpartyMap = new Map((allCounterparties || []).map((c: { id: string; name: string }) => [c.id, c.name]))
+
+    // --- Pattern detection algorithm ---
+    const txs = transactions || []
+
+    // Step 1: Group by similarity key
+    type TxRecord = typeof txs[number]
+    const groups = new Map<string, TxRecord[]>()
+
+    for (const tx of txs) {
+      // Grouping priority: counterparty > normalized description
+      let key: string
+      if (tx.counterparty_id) {
+        key = `cp:${tx.counterparty_id}:${tx.container_id}:${parseFloat(tx.amount as string) >= 0 ? 'in' : 'out'}`
+      } else {
+        // Normalize description: lowercase, remove numbers/dates, trim
+        const desc = ((tx.description as string) || '')
+          .toLowerCase()
+          .replace(/\d{2}[/\-.]\d{2}[/\-.]\d{2,4}/g, '') // remove dates
+          .replace(/\d+[,.]?\d*/g, '')                      // remove numbers
+          .replace(/\s+/g, ' ')
+          .trim()
+        key = `desc:${desc}:${tx.container_id}:${parseFloat(tx.amount as string) >= 0 ? 'in' : 'out'}`
+      }
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key)!.push(tx)
+    }
+
+    // Step 2: Analyze each group
+    interface DetectedPattern {
+      description: string
+      counterpartyId: string | null
+      counterpartyName: string | null
+      containerId: string
+      containerName: string | null
+      type: string
+      frequency: string
+      dayOfMonth: number | null
+      dayOfWeek: number | null
+      avgAmount: number
+      medianAmount: number
+      amountVariance: number
+      amountIsEstimate: boolean
+      confidence: number
+      occurrences: number
+      transactionIds: string[]
+      lastDate: string
+    }
+
+    const patterns: DetectedPattern[] = []
+
+    for (const [, groupTxs] of groups) {
+      if (groupTxs.length < minOccurrences) continue
+
+      // Calculate timespan
+      const dates = groupTxs.map(t => new Date(t.date as string).getTime()).sort((a, b) => a - b)
+      const timespanDays = (dates[dates.length - 1] - dates[0]) / (1000 * 60 * 60 * 24)
+      if (timespanDays < 20) continue // Too short to detect patterns
+
+      // Calculate intervals between consecutive transactions
+      const intervals: number[] = []
+      for (let i = 1; i < dates.length; i++) {
+        intervals.push((dates[i] - dates[i - 1]) / (1000 * 60 * 60 * 24))
+      }
+
+      if (intervals.length === 0) continue
+
+      const medianInterval = intervals.slice().sort((a, b) => a - b)[Math.floor(intervals.length / 2)]
+      const meanInterval = intervals.reduce((s, v) => s + v, 0) / intervals.length
+      const intervalStddev = Math.sqrt(intervals.reduce((s, v) => s + (v - meanInterval) ** 2, 0) / intervals.length)
+      const intervalCV = meanInterval > 0 ? intervalStddev / meanInterval : 999
+
+      // Classify frequency
+      let frequency: string | null = null
+      if (intervalCV < 0.35) {
+        if (medianInterval >= 5 && medianInterval <= 9) frequency = 'weekly'
+        else if (medianInterval >= 12 && medianInterval <= 16) frequency = 'biweekly'
+        else if (medianInterval >= 25 && medianInterval <= 35) frequency = 'monthly'
+        else if (medianInterval >= 55 && medianInterval <= 65) frequency = 'bimonthly'
+        else if (medianInterval >= 80 && medianInterval <= 100) frequency = 'quarterly'
+        else if (medianInterval >= 170 && medianInterval <= 195) frequency = 'semi_annual'
+        else if (medianInterval >= 350 && medianInterval <= 380) frequency = 'annual'
+      }
+
+      if (!frequency) continue // Can't determine frequency
+
+      // Analyze amounts
+      const amounts = groupTxs.map(t => Math.abs(parseFloat(t.amount as string)))
+      const sortedAmounts = amounts.slice().sort((a, b) => a - b)
+      const avgAmount = amounts.reduce((s, v) => s + v, 0) / amounts.length
+      const medianAmount = sortedAmounts[Math.floor(sortedAmounts.length / 2)]
+      const amountStddev = Math.sqrt(amounts.reduce((s, v) => s + (v - avgAmount) ** 2, 0) / amounts.length)
+      const amountCV = avgAmount > 0 ? amountStddev / avgAmount : 0
+      const amountIsEstimate = amountCV > 0.05
+
+      // Determine day of month/week
+      let dayOfMonth: number | null = null
+      let dayOfWeek: number | null = null
+
+      if (['monthly', 'bimonthly', 'quarterly', 'semi_annual', 'annual'].includes(frequency)) {
+        const days = groupTxs.map(t => new Date(t.date as string).getDate())
+        const dayCounts = new Map<number, number>()
+        days.forEach(d => dayCounts.set(d, (dayCounts.get(d) || 0) + 1))
+        dayOfMonth = [...dayCounts.entries()].sort((a, b) => b[1] - a[1])[0][0]
+      }
+      if (['weekly', 'biweekly'].includes(frequency)) {
+        const wdays = groupTxs.map(t => new Date(t.date as string).getDay())
+        const wdayCounts = new Map<number, number>()
+        wdays.forEach(d => wdayCounts.set(d, (wdayCounts.get(d) || 0) + 1))
+        dayOfWeek = [...wdayCounts.entries()].sort((a, b) => b[1] - a[1])[0][0]
+      }
+
+      // Calculate confidence score
+      let confidence = 0
+      if (groupTxs.length >= 6) confidence += 30
+      else if (groupTxs.length >= 4) confidence += 20
+      else confidence += 10
+
+      if (intervalCV < 0.1) confidence += 30
+      else if (intervalCV < 0.2) confidence += 20
+      else if (intervalCV < 0.3) confidence += 10
+
+      if (amountCV < 0.01) confidence += 20
+      else if (amountCV < 0.05) confidence += 15
+      else if (amountCV < 0.15) confidence += 5
+
+      if (groupTxs[0].counterparty_id) confidence += 10
+
+      // Check recency (last occurrence within 45 days)
+      const lastDate = new Date(dates[dates.length - 1])
+      const daysSinceLast = (Date.now() - lastDate.getTime()) / (1000 * 60 * 60 * 24)
+      if (daysSinceLast <= 45) confidence += 10
+
+      const firstTx = groupTxs[0]
+      const isIncome = parseFloat(firstTx.amount as string) >= 0
+
+      patterns.push({
+        description: (groupTxs
+          .map(t => (t.description as string) || '')
+          .sort((a, b) => a.length - b.length)[Math.floor(groupTxs.length / 2)]) || 'Senza descrizione',
+        counterpartyId: (firstTx.counterparty_id as string) || null,
+        counterpartyName: firstTx.counterparty_id ? (counterpartyMap.get(firstTx.counterparty_id as string) || null) : null,
+        containerId: firstTx.container_id as string,
+        containerName: containerMap.get(firstTx.container_id as string) || null,
+        type: isIncome ? 'income' : 'expense',
+        frequency,
+        dayOfMonth,
+        dayOfWeek,
+        avgAmount: isIncome ? avgAmount : -avgAmount,
+        medianAmount: isIncome ? medianAmount : -medianAmount,
+        amountVariance: Math.round(amountCV * 100),
+        amountIsEstimate,
+        confidence: Math.min(confidence, 100),
+        occurrences: groupTxs.length,
+        transactionIds: groupTxs.map(t => t.id as string),
+        lastDate: lastDate.toISOString().slice(0, 10),
+      })
+    }
+
+    // Sort by confidence descending
+    patterns.sort((a, b) => b.confidence - a.confidence)
+
+    return ok(res, { patterns })
+  }
+
+  // POST /recurrences { _action: 'create-batch' } — create multiple recurrences from detection
+  if (method === 'POST' && bodyActionRec === 'create-batch') {
+    const b = req.body || {}
+    const recurrences = b.recurrences as Array<Record<string, unknown>>
+    if (!Array.isArray(recurrences) || recurrences.length === 0) {
+      return badRequest(res, 'recurrences[] è obbligatorio')
+    }
+
+    const insertedIds: string[] = []
+    const errors: string[] = []
+
+    for (const rec of recurrences) {
+      const { data, error } = await sb
+        .from('recurrences')
+        .insert({
+          description: rec.description,
+          frequency: rec.frequency,
+          day_of_month: rec.dayOfMonth ?? null,
+          day_of_week: rec.dayOfWeek ?? null,
+          business_days_only: false,
+          amount: rec.amount ?? null,
+          amount_is_estimate: rec.amountIsEstimate ?? false,
+          currency: rec.currency ?? 'EUR',
+          container_id: rec.containerId ?? null,
+          counterparty_id: rec.counterpartyId ?? null,
+          type: rec.type,
+          start_date: rec.startDate ?? new Date().toISOString().slice(0, 10),
+          is_active: true,
+        })
+        .select('id')
+        .single()
+
+      if (error) {
+        errors.push(`${rec.description}: ${error.message}`)
+      } else if (data) {
+        insertedIds.push(data.id)
+
+        // Link historical transactions to this recurrence
+        const txIds = rec.transactionIds as string[] | undefined
+        if (txIds && txIds.length > 0) {
+          await sb
+            .from('transactions')
+            .update({ recurrence_id: data.id })
+            .in('id', txIds)
+        }
+      }
+    }
+
+    return created(res, { created: insertedIds.length, ids: insertedIds, errors: errors.length > 0 ? errors : undefined })
+  }
 
   if (method === 'GET' && !id) {
     const { data, error } = await sb
@@ -612,6 +1593,45 @@ async function handleRecurrences(
     delete row.containers
     delete row.counterparties
     return ok(res, row)
+  }
+
+  const bodyAction = (req.body as Record<string, unknown>)?._action
+
+  if (method === 'POST' && bodyAction === 'update') {
+    const b = req.body || {}
+    const recId = b.id as string
+    if (!recId) return badRequest(res, 'id è obbligatorio')
+    const update: Record<string, unknown> = { updated_at: new Date().toISOString() }
+    if (b.description !== undefined) update.description = b.description
+    if (b.frequency !== undefined) update.frequency = b.frequency
+    if (b.intervalDays !== undefined) update.interval_days = b.intervalDays
+    if (b.dayOfMonth !== undefined) update.day_of_month = b.dayOfMonth
+    if (b.dayOfWeek !== undefined) update.day_of_week = b.dayOfWeek
+    if (b.businessDaysOnly !== undefined) update.business_days_only = b.businessDaysOnly
+    if (b.amount !== undefined) update.amount = b.amount
+    if (b.amountIsEstimate !== undefined) update.amount_is_estimate = b.amountIsEstimate
+    if (b.currency !== undefined) update.currency = b.currency
+    if (b.containerId !== undefined) update.container_id = b.containerId
+    if (b.counterpartyId !== undefined) update.counterparty_id = b.counterpartyId
+    if (b.type !== undefined) update.type = b.type
+    if (b.sharedWithSubjectId !== undefined) update.shared_with_subject_id = b.sharedWithSubjectId
+    if (b.sharePercentage !== undefined) update.share_percentage = b.sharePercentage
+    if (b.startDate !== undefined) update.start_date = b.startDate
+    if (b.endDate !== undefined) update.end_date = b.endDate
+    if (b.reminderDaysBefore !== undefined) update.reminder_days_before = b.reminderDaysBefore
+    if (b.isActive !== undefined) update.is_active = b.isActive
+
+    const { data, error } = await sb.from('recurrences').update(update).eq('id', recId).select().single()
+    if (error || !data) return notFound(res, 'Ricorrenza non trovata')
+    return ok(res, data)
+  }
+
+  if (method === 'POST' && bodyAction === 'delete') {
+    const recId = (req.body as Record<string, unknown>)?.id as string
+    if (!recId) return badRequest(res, 'id è obbligatorio')
+    const { data, error } = await sb.from('recurrences').delete().eq('id', recId).select('id').single()
+    if (error || !data) return notFound(res, 'Ricorrenza non trovata')
+    return ok(res, { deleted: true, id: recId })
   }
 
   if (method === 'POST') {
@@ -669,12 +1689,7 @@ async function handleRecurrences(
     if (b.reminderDaysBefore !== undefined) update.reminder_days_before = b.reminderDaysBefore
     if (b.isActive !== undefined) update.is_active = b.isActive
 
-    const { data, error } = await sb
-      .from('recurrences')
-      .update(update)
-      .eq('id', id)
-      .select()
-      .single()
+    const { data, error } = await sb.from('recurrences').update(update).eq('id', id).select().single()
     if (error || !data) return notFound(res, 'Ricorrenza non trovata')
     return ok(res, data)
   }
@@ -810,7 +1825,41 @@ async function handleBudget(
     return ok(res, { ...period, allocations: flatAllocs })
   }
 
-  if (method === 'POST' && !periodId) {
+  // POST-based actions for budget (update/delete via POST to avoid Vercel multi-segment path 404)
+  const bodyAction = (req.body as Record<string, unknown>)?._action
+
+  if (method === 'POST' && bodyAction === 'update') {
+    const b = req.body || {}
+    const pId = b.id as string
+    if (!pId) return badRequest(res, 'id è obbligatorio')
+    const update: Record<string, unknown> = {}
+    if (b.name !== undefined) update.name = b.name
+    if (b.startDate !== undefined) update.start_date = b.startDate
+    if (b.endDate !== undefined) update.end_date = b.endDate
+    if (b.isActive !== undefined) update.is_active = b.isActive
+
+    const { data, error } = await sb.from('budget_periods').update(update).eq('id', pId).select().single()
+    if (error || !data) return notFound(res, 'Periodo non trovato')
+    return ok(res, data)
+  }
+
+  if (method === 'POST' && bodyAction === 'delete') {
+    const pId = (req.body as Record<string, unknown>)?.id as string
+    if (!pId) return badRequest(res, 'id è obbligatorio')
+    const { data, error } = await sb.from('budget_periods').delete().eq('id', pId).select('id').single()
+    if (error || !data) return notFound(res, 'Periodo non trovato')
+    return ok(res, { deleted: true, id: pId })
+  }
+
+  if (method === 'POST' && bodyAction === 'delete-allocation') {
+    const allocId = (req.body as Record<string, unknown>)?.id as string
+    if (!allocId) return badRequest(res, 'id è obbligatorio')
+    const { data, error } = await sb.from('budget_allocations').delete().eq('id', allocId).select('id').single()
+    if (error || !data) return notFound(res, 'Allocazione non trovata')
+    return ok(res, { deleted: true, id: allocId })
+  }
+
+  if (method === 'POST' && !periodId && !bodyAction) {
     const b = req.body || {}
     if (!b.name || !b.startDate || !b.endDate) return badRequest(res, 'name, startDate e endDate sono obbligatori')
     const { data, error } = await sb
@@ -835,12 +1884,7 @@ async function handleBudget(
     if (b.endDate !== undefined) update.end_date = b.endDate
     if (b.isActive !== undefined) update.is_active = b.isActive
 
-    const { data, error } = await sb
-      .from('budget_periods')
-      .update(update)
-      .eq('id', periodId)
-      .select()
-      .single()
+    const { data, error } = await sb.from('budget_periods').update(update).eq('id', periodId).select().single()
     if (error || !data) return notFound(res, 'Periodo non trovato')
     return ok(res, data)
   }
@@ -859,10 +1903,249 @@ async function handleBudget(
 // ============================================================
 
 async function handleStats(
-  _req: VercelRequest,
+  req: VercelRequest,
   res: VercelResponse,
+  segments: string[],
 ) {
   const sb = getSupabase()
+  const subRoute = segments[1] || ''
+
+  // ── GET /stats/by-tag — breakdown per tag con somme e conteggi ──
+  if (subRoute === 'by-tag') {
+    const params = (req.query || {}) as Record<string, string | string[]>
+    const param = (k: string) => { const v = params[k]; return Array.isArray(v) ? v[0] : v }
+    const dateFrom = param('dateFrom')
+    const dateTo = param('dateTo')
+    const containerId = param('containerId')
+    const direction = param('direction') || 'expense' // expense or income
+
+    // Build transaction query
+    let txQuery = sb
+      .from('transactions')
+      .select('id, amount, date')
+      .neq('status', 'cancelled')
+      .neq('type', 'transfer_in')
+      .neq('type', 'transfer_out')
+    if (dateFrom) txQuery = txQuery.gte('date', dateFrom)
+    if (dateTo) txQuery = txQuery.lte('date', dateTo)
+    if (containerId) txQuery = txQuery.eq('container_id', containerId)
+    if (direction === 'expense') {
+      txQuery = txQuery.lt('amount', '0')
+    } else {
+      txQuery = txQuery.gt('amount', '0')
+    }
+
+    const { data: txs } = await txQuery
+    const txMap = new Map<string, { amount: number; date: string }>()
+    for (const tx of txs || []) {
+      txMap.set(tx.id as string, { amount: parseFloat(tx.amount as string) || 0, date: tx.date as string })
+    }
+
+    // Get all transaction_tags for these transactions
+    const txIds = [...txMap.keys()]
+    const tagTotals = new Map<string, { total: number; count: number }>()
+    let untaggedTotal = 0
+    let untaggedCount = 0
+    const taggedTxIds = new Set<string>()
+
+    if (txIds.length > 0) {
+      for (let i = 0; i < txIds.length; i += 500) {
+        const chunk = txIds.slice(i, i + 500)
+        const { data: ttRows } = await sb
+          .from('transaction_tags')
+          .select('transaction_id, tag_id')
+          .in('transaction_id', chunk)
+
+        for (const row of (ttRows || []) as Array<Record<string, unknown>>) {
+          const tid = row.transaction_id as string
+          const tagId = row.tag_id as string
+          const txData = txMap.get(tid)
+          if (!txData) continue
+          taggedTxIds.add(tid)
+          if (!tagTotals.has(tagId)) tagTotals.set(tagId, { total: 0, count: 0 })
+          const entry = tagTotals.get(tagId)!
+          entry.total += Math.abs(txData.amount)
+          entry.count += 1
+        }
+      }
+    }
+
+    // Calculate untagged
+    for (const [tid, txData] of txMap) {
+      if (!taggedTxIds.has(tid)) {
+        untaggedTotal += Math.abs(txData.amount)
+        untaggedCount += 1
+      }
+    }
+
+    const grandTotal = [...tagTotals.values()].reduce((s, e) => s + e.total, 0) + untaggedTotal
+
+    // Fetch tag details for all found tags
+    const tagIds = [...tagTotals.keys()]
+    let tagInfoMap = new Map<string, { name: string; color: string }>()
+    if (tagIds.length > 0) {
+      const { data: tagRows } = await sb
+        .from('tags')
+        .select('id, name, color')
+        .in('id', tagIds)
+      for (const t of tagRows || []) {
+        tagInfoMap.set(t.id as string, { name: t.name as string, color: t.color as string })
+      }
+    }
+
+    // Build result from actual tag usage
+    const breakdown = tagIds
+      .map((tagId) => {
+        const entry = tagTotals.get(tagId)!
+        const info = tagInfoMap.get(tagId) || { name: 'Sconosciuto', color: '#6b7280' }
+        return {
+          tagId,
+          tagName: info.name,
+          tagColor: info.color,
+          total: entry.total,
+          count: entry.count,
+          percentage: grandTotal > 0 ? (entry.total / grandTotal) * 100 : 0,
+        }
+      })
+      .filter((b) => b.total > 0)
+      .sort((a, b) => b.total - a.total)
+
+    if (untaggedCount > 0) {
+      breakdown.push({
+        tagId: null as unknown as string,
+        tagName: 'Non categorizzato',
+        tagColor: '#6b7280',
+        total: untaggedTotal,
+        count: untaggedCount,
+        percentage: grandTotal > 0 ? (untaggedTotal / grandTotal) * 100 : 0,
+      })
+    }
+
+    return ok(res, { breakdown, grandTotal, transactionCount: txMap.size })
+  }
+
+  // ── GET /stats/monthly-trend — monthly income/expenses ──
+  if (subRoute === 'monthly-trend') {
+    const params = (req.query || {}) as Record<string, string | string[]>
+    const param = (k: string) => { const v = params[k]; return Array.isArray(v) ? v[0] : v }
+    const dateFrom = param('dateFrom')
+    const dateTo = param('dateTo')
+    const containerId = param('containerId')
+
+    // Fallback: if no dateFrom, use months param (backwards compat)
+    let startStr: string
+    let endStr: string | undefined
+    if (dateFrom) {
+      startStr = dateFrom
+      endStr = dateTo || undefined
+    } else {
+      const months = parseInt(param('months') || '6')
+      const now = new Date()
+      const startDate = new Date(now.getFullYear(), now.getMonth() - months + 1, 1)
+      startStr = startDate.toISOString().slice(0, 10)
+    }
+
+    let query = sb
+      .from('transactions')
+      .select('date, amount, type')
+      .gte('date', startStr)
+      .neq('status', 'cancelled')
+    if (endStr) query = query.lte('date', endStr)
+    if (containerId) query = query.eq('container_id', containerId)
+
+    const { data: txs } = await query
+
+    // Group by month
+    const monthMap = new Map<string, { income: number; expenses: number }>()
+    for (const tx of txs || []) {
+      const month = (tx.date as string).slice(0, 7) // YYYY-MM
+      if (!monthMap.has(month)) monthMap.set(month, { income: 0, expenses: 0 })
+      const entry = monthMap.get(month)!
+      const amt = parseFloat(tx.amount as string) || 0
+      const type = tx.type as string
+      // Exclude transfers from income/expense stats
+      if (type === 'transfer_in' || type === 'transfer_out') continue
+      if (amt > 0) entry.income += amt
+      else entry.expenses += Math.abs(amt)
+    }
+
+    // Sort chronologically and format
+    const trend = [...monthMap.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([month, data]) => ({
+        month,
+        income: Math.round(data.income * 100) / 100,
+        expenses: Math.round(data.expenses * 100) / 100,
+        net: Math.round((data.income - data.expenses) * 100) / 100,
+      }))
+
+    return ok(res, { trend })
+  }
+
+  // ── GET /stats/burning-rate — daily spending rate and autonomy ──
+  if (subRoute === 'burning-rate') {
+    const params = (req.query || {}) as Record<string, string | string[]>
+    const param = (k: string) => { const v = params[k]; return Array.isArray(v) ? v[0] : v }
+    const days = parseInt(param('days') || '90')
+
+    const startDate = new Date()
+    startDate.setDate(startDate.getDate() - days)
+    const startStr = startDate.toISOString().slice(0, 10)
+
+    const { data: txs } = await sb
+      .from('transactions')
+      .select('amount, type')
+      .gte('date', startStr)
+      .eq('status', 'completed')
+      .neq('type', 'transfer_in')
+      .neq('type', 'transfer_out')
+
+    let totalIncome = 0
+    let totalExpenses = 0
+    for (const tx of txs || []) {
+      const amt = parseFloat(tx.amount as string) || 0
+      if (amt > 0) totalIncome += amt
+      else totalExpenses += Math.abs(amt)
+    }
+
+    const dailyExpense = totalExpenses / days
+    const dailyIncome = totalIncome / days
+    const savingsRate = totalIncome > 0 ? ((totalIncome - totalExpenses) / totalIncome) * 100 : 0
+
+    // Get total balance for autonomy calculation
+    const { data: containers } = await sb
+      .from('containers')
+      .select('id, initial_balance')
+      .eq('is_active', true)
+    let totalBalance = 0
+    const activeIds = (containers || []).map((c: Record<string, unknown>) => {
+      totalBalance += parseFloat(c.initial_balance as string) || 0
+      return c.id as string
+    })
+    if (activeIds.length > 0) {
+      const { data: balanceTxs } = await sb
+        .from('transactions')
+        .select('amount')
+        .in('container_id', activeIds)
+        .neq('status', 'cancelled')
+      for (const tx of balanceTxs || []) {
+        totalBalance += parseFloat(tx.amount as string) || 0
+      }
+    }
+
+    const autonomyDays = dailyExpense > 0 ? Math.round(totalBalance / dailyExpense) : 9999
+
+    return ok(res, {
+      dailyExpense: Math.round(dailyExpense * 100) / 100,
+      dailyIncome: Math.round(dailyIncome * 100) / 100,
+      savingsRate: Math.round(savingsRate * 10) / 10,
+      autonomyDays: autonomyDays,
+      totalBalance: Math.round(totalBalance * 100) / 100,
+      periodDays: days,
+    })
+  }
+
+  // ── Default: GET /stats — dashboard (original) ──
 
   // 1) Balances by currency (active containers + their transactions)
   const { data: containers } = await sb
@@ -978,6 +2261,341 @@ async function handleStats(
 }
 
 // ============================================================
+// SMART RULES - Auto-categorization rules
+// ============================================================
+
+async function handleSmartRules(
+  req: VercelRequest,
+  res: VercelResponse,
+  id: string | null,
+) {
+  const sb = getSupabase()
+  const method = req.method
+
+  // GET list — all rules with joined tag/counterparty/container names
+  if (method === 'GET' && !id) {
+    const { data, error } = await sb
+      .from('smart_rules')
+      .select('*, tags!smart_rules_assign_tag_id_tags_id_fk(id, name, color, type), counterparties(name), containers(name)')
+      .order('priority', { ascending: false })
+      .order('name')
+    if (error) throw error
+
+    const rows = (data || []).map((r: Record<string, unknown>) => {
+      const row = { ...r } as Record<string, unknown>
+      const tag = row.tags as Record<string, unknown> | null
+      const cp = row.counterparties as { name?: string } | null
+      const ct = row.containers as { name?: string } | null
+      row.assign_tag = tag
+      row.counterparty_name = cp?.name ?? null
+      row.container_name = ct?.name ?? null
+      delete row.tags
+      delete row.counterparties
+      delete row.containers
+      return row
+    })
+    return ok(res, rows)
+  }
+
+  // POST-based actions
+  const bodyAction = (req.body as Record<string, unknown>)?._action
+
+  // POST create
+  if (method === 'POST' && !bodyAction) {
+    const b = req.body || {}
+    const { data, error } = await sb.from('smart_rules').insert({
+      name: b.name,
+      description_pattern: b.descriptionPattern ?? null,
+      counterparty_id: b.counterpartyId ?? null,
+      container_id: b.containerId ?? null,
+      amount_min: b.amountMin ?? null,
+      amount_max: b.amountMax ?? null,
+      transaction_type: b.transactionType ?? null,
+      assign_tag_id: b.assignTagId,
+      priority: b.priority ?? 0,
+      is_active: b.isActive ?? true,
+      auto_apply: b.autoApply ?? true,
+    }).select().single()
+    if (error) throw error
+    return created(res, data)
+  }
+
+  // POST update
+  if (method === 'POST' && bodyAction === 'update') {
+    const b = req.body || {}
+    const ruleId = b.id as string
+    if (!ruleId) return badRequest(res, 'id è obbligatorio')
+
+    const update: Record<string, unknown> = { updated_at: new Date().toISOString() }
+    if (b.name !== undefined) update.name = b.name
+    if (b.descriptionPattern !== undefined) update.description_pattern = b.descriptionPattern
+    if (b.counterpartyId !== undefined) update.counterparty_id = b.counterpartyId
+    if (b.containerId !== undefined) update.container_id = b.containerId
+    if (b.amountMin !== undefined) update.amount_min = b.amountMin
+    if (b.amountMax !== undefined) update.amount_max = b.amountMax
+    if (b.transactionType !== undefined) update.transaction_type = b.transactionType
+    if (b.assignTagId !== undefined) update.assign_tag_id = b.assignTagId
+    if (b.priority !== undefined) update.priority = b.priority
+    if (b.isActive !== undefined) update.is_active = b.isActive
+    if (b.autoApply !== undefined) update.auto_apply = b.autoApply
+
+    const { error } = await sb.from('smart_rules').update(update).eq('id', ruleId)
+    if (error) throw error
+    return ok(res, { updated: true })
+  }
+
+  // POST delete
+  if (method === 'POST' && bodyAction === 'delete') {
+    const ruleId = (req.body as Record<string, unknown>)?.id as string
+    if (!ruleId) return badRequest(res, 'id è obbligatorio')
+    const { error } = await sb.from('smart_rules').delete().eq('id', ruleId)
+    if (error) throw error
+    return ok(res, { deleted: true })
+  }
+
+  // POST auto-tag — apply all active rules to untagged transactions
+  if (method === 'POST' && bodyAction === 'auto-tag') {
+    const b = req.body || {}
+    const dryRun = !!b.dryRun
+    const limit = parseInt(b.limit as string) || 500
+
+    // 1. Get all active rules, ordered by priority desc
+    const { data: rules } = await sb
+      .from('smart_rules')
+      .select('*')
+      .eq('is_active', true)
+      .order('priority', { ascending: false })
+
+    if (!rules || rules.length === 0) {
+      return ok(res, { applied: 0, matches: [], message: 'Nessuna regola attiva' })
+    }
+
+    // 2. Get untagged transactions (those with no entry in transaction_tags)
+    // First get all transaction IDs that have at least one tag
+    const { data: taggedIds } = await sb
+      .from('transaction_tags')
+      .select('transaction_id')
+    const taggedSet = new Set((taggedIds || []).map((r: Record<string, unknown>) => r.transaction_id as string))
+
+    // Get recent transactions
+    const { data: txs } = await sb
+      .from('transactions')
+      .select('id, description, counterparty_id, container_id, amount, type')
+      .neq('status', 'cancelled')
+      .order('date', { ascending: false })
+      .limit(limit * 3) // Fetch more to filter for untagged
+
+    const untaggedTxs = (txs || []).filter((t: Record<string, unknown>) => !taggedSet.has(t.id as string)).slice(0, limit)
+
+    // 3. Match rules against untagged transactions
+    const matches: Array<{ transactionId: string; ruleId: string; ruleName: string; tagId: string; description: string }> = []
+
+    for (const tx of untaggedTxs) {
+      for (const rule of rules as Array<Record<string, unknown>>) {
+        let matched = true
+
+        // Check description pattern
+        if (rule.description_pattern) {
+          const pattern = (rule.description_pattern as string).toLowerCase()
+          const desc = ((tx.description as string) || '').toLowerCase()
+          if (!desc.includes(pattern)) {
+            // Try regex
+            try {
+              const regex = new RegExp(pattern, 'i')
+              if (!regex.test(desc)) matched = false
+            } catch {
+              matched = false
+            }
+          }
+        }
+
+        // Check counterparty
+        if (matched && rule.counterparty_id && tx.counterparty_id !== rule.counterparty_id) {
+          matched = false
+        }
+
+        // Check container
+        if (matched && rule.container_id && tx.container_id !== rule.container_id) {
+          matched = false
+        }
+
+        // Check amount range
+        if (matched && rule.amount_min) {
+          const txAmt = Math.abs(parseFloat(tx.amount as string))
+          if (txAmt < parseFloat(rule.amount_min as string)) matched = false
+        }
+        if (matched && rule.amount_max) {
+          const txAmt = Math.abs(parseFloat(tx.amount as string))
+          if (txAmt > parseFloat(rule.amount_max as string)) matched = false
+        }
+
+        // Check transaction type
+        if (matched && rule.transaction_type && tx.type !== rule.transaction_type) {
+          matched = false
+        }
+
+        if (matched) {
+          matches.push({
+            transactionId: tx.id as string,
+            ruleId: rule.id as string,
+            ruleName: rule.name as string,
+            tagId: rule.assign_tag_id as string,
+            description: (tx.description as string) || '(nessuna descrizione)',
+          })
+          break // First matching rule wins (highest priority)
+        }
+      }
+    }
+
+    // 4. Apply tags (if not dry run)
+    if (!dryRun && matches.length > 0) {
+      const inserts = matches.map(m => ({
+        transaction_id: m.transactionId,
+        tag_id: m.tagId,
+      }))
+      // Insert in chunks
+      for (let i = 0; i < inserts.length; i += 100) {
+        const chunk = inserts.slice(i, i + 100)
+        await sb.from('transaction_tags').upsert(chunk, {
+          onConflict: 'transaction_id,tag_id',
+          ignoreDuplicates: true,
+        })
+      }
+    }
+
+    return ok(res, {
+      applied: dryRun ? 0 : matches.length,
+      matches,
+      dryRun,
+      totalUntagged: untaggedTxs.length,
+      totalRules: rules.length,
+    })
+  }
+
+  // POST suggest-rules — analyze tagged transactions and suggest new rules
+  if (method === 'POST' && bodyAction === 'suggest-rules') {
+    // Fetch transactions that already have tags, with their counterparties and descriptions
+    const { data: taggedTxs } = await sb
+      .from('transaction_tags')
+      .select('transaction_id, tag_id, tags(id, name, color, type)')
+      .limit(2000)
+
+    if (!taggedTxs || taggedTxs.length === 0) {
+      return ok(res, { suggestions: [], message: 'Nessuna transazione taggata trovata per analisi' })
+    }
+
+    // Get the transactions themselves
+    const txIds = [...new Set((taggedTxs as Array<Record<string, unknown>>).map(r => r.transaction_id as string))]
+    const txMap = new Map<string, Record<string, unknown>>()
+    for (let i = 0; i < txIds.length; i += 500) {
+      const chunk = txIds.slice(i, i + 500)
+      const { data: txs } = await sb
+        .from('transactions')
+        .select('id, description, counterparty_id, container_id, amount, type, counterparties(name)')
+        .in('id', chunk)
+      for (const tx of txs || []) {
+        txMap.set(tx.id as string, tx as Record<string, unknown>)
+      }
+    }
+
+    // Build a map: tagId -> array of transactions
+    const tagTxMap = new Map<string, Array<{ tx: Record<string, unknown>; tagName: string; tagColor: string }>>()
+    for (const row of taggedTxs as Array<Record<string, unknown>>) {
+      const tagId = row.tag_id as string
+      const tag = row.tags as Record<string, unknown> | null
+      const tx = txMap.get(row.transaction_id as string)
+      if (!tx || !tag) continue
+      if (!tagTxMap.has(tagId)) tagTxMap.set(tagId, [])
+      tagTxMap.get(tagId)!.push({ tx, tagName: tag.name as string, tagColor: (tag.color as string) || '#6b7280' })
+    }
+
+    // For each tag, find common patterns
+    const suggestions: Array<{
+      tagId: string
+      tagName: string
+      tagColor: string
+      type: string // 'counterparty' | 'keyword' | 'amount_range'
+      pattern: string
+      confidence: number
+      exampleCount: number
+      ruleName: string
+    }> = []
+
+    // Get existing rules to avoid duplicates
+    const { data: existingRules } = await sb.from('smart_rules').select('description_pattern, counterparty_id, assign_tag_id')
+    const existingRuleKeys = new Set(
+      (existingRules || []).map((r: Record<string, unknown>) =>
+        `${r.description_pattern || ''}_${r.counterparty_id || ''}_${r.assign_tag_id}`,
+      ),
+    )
+
+    for (const [tagId, entries] of tagTxMap) {
+      if (entries.length < 2) continue // Need at least 2 transactions to suggest a pattern
+      const { tagName, tagColor } = entries[0]
+
+      // Pattern 1: Same counterparty
+      const counterpartyCounts = new Map<string, { count: number; name: string }>()
+      for (const { tx } of entries) {
+        const cpId = tx.counterparty_id as string | null
+        if (!cpId) continue
+        const cpObj = tx.counterparties as { name?: string } | null
+        if (!counterpartyCounts.has(cpId)) counterpartyCounts.set(cpId, { count: 0, name: cpObj?.name || 'Sconosciuto' })
+        counterpartyCounts.get(cpId)!.count++
+      }
+      for (const [cpId, { count, name }] of counterpartyCounts) {
+        if (count < 2) continue
+        const ruleKey = `_${cpId}_${tagId}`
+        if (existingRuleKeys.has(ruleKey)) continue
+        suggestions.push({
+          tagId,
+          tagName,
+          tagColor,
+          type: 'counterparty',
+          pattern: cpId,
+          confidence: Math.min(95, 50 + count * 10),
+          exampleCount: count,
+          ruleName: `${name} → ${tagName}`,
+        })
+      }
+
+      // Pattern 2: Common keywords in descriptions
+      const wordCounts = new Map<string, number>()
+      const stopWords = new Set(['di', 'del', 'della', 'il', 'la', 'le', 'lo', 'un', 'una', 'per', 'con', 'da', 'in', 'su', 'a', 'e', 'o', 'che', 'non', 'and', 'the', 'for', 'from', 'to', '-', '/', 'nr', 'n', 'pagamento', 'payment'])
+      for (const { tx } of entries) {
+        const desc = ((tx.description as string) || '').toLowerCase()
+        const words = desc.split(/[\s,;.:()\-/]+/).filter(w => w.length > 3 && !stopWords.has(w))
+        const uniqueWords = new Set(words)
+        for (const word of uniqueWords) {
+          wordCounts.set(word, (wordCounts.get(word) || 0) + 1)
+        }
+      }
+      for (const [word, count] of wordCounts) {
+        if (count < 3 || count / entries.length < 0.5) continue // At least 50% of transactions have this keyword
+        const ruleKey = `${word}__${tagId}`
+        if (existingRuleKeys.has(ruleKey)) continue
+        suggestions.push({
+          tagId,
+          tagName,
+          tagColor,
+          type: 'keyword',
+          pattern: word,
+          confidence: Math.min(90, 40 + count * 8),
+          exampleCount: count,
+          ruleName: `"${word}" → ${tagName}`,
+        })
+      }
+    }
+
+    // Sort by confidence desc, limit to top 20
+    suggestions.sort((a, b) => b.confidence - a.confidence)
+
+    return ok(res, { suggestions: suggestions.slice(0, 20) })
+  }
+
+  return badRequest(res, 'Metodo non supportato')
+}
+
+// ============================================================
 // MAIN ROUTER
 // ============================================================
 
@@ -986,20 +2604,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   setCors(res)
   if (req.method === 'OPTIONS') return res.status(204).end()
 
-  // Extract path segments from catch-all query param
-  const pathParam = req.query.path
-  let segments: string[]
-
-  if (pathParam) {
-    segments = Array.isArray(pathParam) ? pathParam : [pathParam]
-  } else {
-    // Fallback: parse from req.url (needed for non-Next.js Vercel projects
-    // where req.query.path may not be populated by the catch-all route)
-    const url = req.url || ''
-    const pathPart = url.split('?')[0]
-    const apiPath = pathPart.replace(/^\/api\/?/, '')
-    segments = apiPath ? apiPath.split('/').filter(Boolean) : []
-  }
+  // Extract path segments — always parse from req.url for reliability
+  // (Vercel rewrites can alter req.query.path, making it unreliable)
+  const url = req.url || ''
+  const pathPart = url.split('?')[0]
+  const apiPath = pathPart.replace(/^\/api\/?/, '')
+  const segments = apiPath ? apiPath.split('/').filter(Boolean) : []
 
   const resource = segments[0] || ''
 
@@ -1019,8 +2629,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return await handleRecurrences(req, res, segments[1] || null)
       case 'budget':
         return await handleBudget(req, res, segments)
+      case 'smart-rules':
+        return await handleSmartRules(req, res, segments[1] || null)
       case 'stats':
-        return await handleStats(req, res)
+        return await handleStats(req, res, segments)
       case 'health':
         return res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() })
       case '':

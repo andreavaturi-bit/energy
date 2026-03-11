@@ -12,6 +12,8 @@ import {
   Check,
   X,
   Loader2,
+  Link2,
+  ShieldCheck,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import {
@@ -24,6 +26,8 @@ import {
 } from '@/lib/csvEngine'
 import type { ImportPreview, ParsedRow } from '@/lib/csvEngine'
 import { useContainers, useSubjects } from '@/lib/hooks'
+import { transactionsApi } from '@/lib/api'
+import { useQueryClient } from '@tanstack/react-query'
 import { formatCurrency, formatDate, cn } from '@/lib/utils'
 import type { ImportProfile } from '@/types'
 
@@ -44,12 +48,15 @@ interface CustomProfile {
   thousandsSeparator: string
   skipRows: number
   amountInverted: boolean
+  separateAmountColumns: boolean
 }
 
 interface ColumnMapping {
   date: string
   description: string
   amount: string
+  amountIn: string
+  amountOut: string
   currency: string
   valueDate: string
   externalId: string
@@ -59,7 +66,68 @@ interface ColumnMapping {
 interface ImportResultData {
   imported: number
   duplicates: number
+  skippedDuplicates: number
   errors: number
+  errorMessages?: string[]
+  reconciled?: number
+}
+
+interface MatchCandidate {
+  csvRowIndex: number
+  csvDescription: string
+  csvAmount: number
+  csvDate: string
+  manualTxId: string
+  manualDescription: string
+  manualAmount: number
+  manualDate: string
+  score: number
+  reasons: string[]
+}
+
+// ============================================================
+// RECONCILIATION SCORING
+// ============================================================
+
+function scoreMatch(
+  csvRow: ParsedRow,
+  manualTx: Record<string, unknown>,
+): { score: number; reasons: string[] } {
+  let score = 0
+  const reasons: string[] = []
+  const csvAmount = csvRow.mapped.amount
+  const manualAmount = parseFloat(manualTx.amount as string)
+
+  // Amount match
+  if (Math.abs(csvAmount - manualAmount) < 0.01) {
+    score += 40; reasons.push('Importo identico')
+  } else if (Math.abs(manualAmount) > 0 && Math.abs(1 - csvAmount / manualAmount) < 0.02) {
+    score += 25; reasons.push('Importo simile (±2%)')
+  }
+
+  // Date match
+  const csvDate = new Date(csvRow.mapped.date)
+  const manualDate = new Date(manualTx.date as string)
+  const daysDiff = Math.abs((csvDate.getTime() - manualDate.getTime()) / (1000 * 60 * 60 * 24))
+  if (daysDiff === 0) { score += 30; reasons.push('Stessa data') }
+  else if (daysDiff <= 1) { score += 20; reasons.push('±1 giorno') }
+  else if (daysDiff <= 3) { score += 10; reasons.push('±3 giorni') }
+
+  // Same type direction
+  const csvIsExpense = csvAmount < 0
+  const manualIsExpense = manualAmount < 0
+  if (csvIsExpense === manualIsExpense) {
+    score += 10; reasons.push('Stessa direzione')
+  }
+
+  // Description similarity (basic word overlap)
+  const csvWords = new Set(csvRow.mapped.description.toLowerCase().split(/\s+/).filter(w => w.length > 2))
+  const manualWords = new Set(((manualTx.description as string) || '').toLowerCase().split(/\s+/).filter(w => w.length > 2))
+  const overlap = [...csvWords].filter(w => manualWords.has(w)).length
+  if (overlap >= 2) { score += 15; reasons.push('Descrizione simile') }
+  else if (overlap >= 1) { score += 5; reasons.push('Parola in comune') }
+
+  return { score: Math.min(score, 100), reasons }
 }
 
 // ============================================================
@@ -96,10 +164,21 @@ const THOUSANDS_OPTIONS = [
   { value: '', label: 'Nessuno' },
 ]
 
-const MAPPING_FIELDS: { key: keyof ColumnMapping; label: string; required: boolean }[] = [
+const MAPPING_FIELDS_SINGLE: { key: keyof ColumnMapping; label: string; required: boolean }[] = [
   { key: 'date', label: 'Data', required: true },
   { key: 'description', label: 'Descrizione', required: true },
   { key: 'amount', label: 'Importo', required: true },
+  { key: 'currency', label: 'Valuta', required: false },
+  { key: 'valueDate', label: 'Data Valuta', required: false },
+  { key: 'externalId', label: 'ID Esterno', required: false },
+  { key: 'notes', label: 'Note', required: false },
+]
+
+const MAPPING_FIELDS_SPLIT: { key: keyof ColumnMapping; label: string; required: boolean }[] = [
+  { key: 'date', label: 'Data', required: true },
+  { key: 'description', label: 'Descrizione', required: true },
+  { key: 'amountIn', label: 'Accrediti (Entrate)', required: true },
+  { key: 'amountOut', label: 'Addebiti (Uscite)', required: true },
   { key: 'currency', label: 'Valuta', required: false },
   { key: 'valueDate', label: 'Data Valuta', required: false },
   { key: 'externalId', label: 'ID Esterno', required: false },
@@ -221,11 +300,14 @@ export function ImportData() {
     thousandsSeparator: '.',
     skipRows: 0,
     amountInverted: false,
+    separateAmountColumns: false,
   })
   const [columnMapping, setColumnMapping] = useState<ColumnMapping>({
     date: '',
     description: '',
     amount: '',
+    amountIn: '',
+    amountOut: '',
     currency: '',
     valueDate: '',
     externalId: '',
@@ -306,6 +388,8 @@ export function ImportData() {
         date: mapping.date || '',
         description: mapping.description || '',
         amount: mapping.amount || '',
+        amountIn: detected.incomeColumn || '',
+        amountOut: detected.expenseColumn || '',
         currency: mapping.currency || '',
         valueDate: mapping.valueDate || '',
         externalId: mapping.externalId || '',
@@ -319,6 +403,7 @@ export function ImportData() {
         thousandsSeparator: detected.thousandsSeparator,
         skipRows: detected.skipRows,
         amountInverted: detected.amountInverted,
+        separateAmountColumns: detected.separateAmountColumns,
       })
     } else {
       setAutoDetectedProfile(null)
@@ -327,6 +412,8 @@ export function ImportData() {
         date: '',
         description: '',
         amount: '',
+        amountIn: '',
+        amountOut: '',
         currency: '',
         valueDate: '',
         externalId: '',
@@ -339,6 +426,7 @@ export function ImportData() {
         thousandsSeparator: '.',
         skipRows: 0,
         amountInverted: false,
+        separateAmountColumns: false,
       })
     }
 
@@ -355,6 +443,8 @@ export function ImportData() {
         date: mapping.date || '',
         description: mapping.description || '',
         amount: mapping.amount || '',
+        amountIn: profile.incomeColumn || '',
+        amountOut: profile.expenseColumn || '',
         currency: mapping.currency || '',
         valueDate: mapping.valueDate || '',
         externalId: mapping.externalId || '',
@@ -367,6 +457,7 @@ export function ImportData() {
         thousandsSeparator: profile.thousandsSeparator,
         skipRows: profile.skipRows,
         amountInverted: profile.amountInverted,
+        separateAmountColumns: profile.separateAmountColumns,
       })
     },
     [],
@@ -381,6 +472,8 @@ export function ImportData() {
 
     const src = profileSelection?.type === 'custom' ? customProfile : (base ?? customProfile)
 
+    const isSplit = src.separateAmountColumns
+
     return {
       name: base?.name || 'Personalizzato',
       fileType: 'csv',
@@ -393,25 +486,106 @@ export function ImportData() {
       columnMapping: {
         date: columnMapping.date,
         description: columnMapping.description,
-        amount: columnMapping.amount,
+        ...(!isSplit ? { amount: columnMapping.amount } : {}),
         ...(columnMapping.currency ? { currency: columnMapping.currency } : {}),
         ...(columnMapping.valueDate ? { valueDate: columnMapping.valueDate } : {}),
         ...(columnMapping.externalId ? { externalId: columnMapping.externalId } : {}),
         ...(columnMapping.notes ? { notes: columnMapping.notes } : {}),
       },
       amountInverted: src.amountInverted,
-      separateAmountColumns: false,
-      dedupColumns: [columnMapping.date, columnMapping.description, columnMapping.amount].filter(Boolean),
+      separateAmountColumns: isSplit,
+      ...(isSplit ? { incomeColumn: columnMapping.amountIn, expenseColumn: columnMapping.amountOut } : {}),
+      dedupColumns: isSplit
+        ? [columnMapping.date, columnMapping.description, columnMapping.amountIn, columnMapping.amountOut].filter(Boolean)
+        : [columnMapping.date, columnMapping.description, columnMapping.amount].filter(Boolean),
     }
   }, [profileSelection, customProfile, columnMapping])
 
-  /** Step 2 -> 3: process import */
+  // --- Match candidates for reconciliation ---
+  const [matchCandidates, setMatchCandidates] = useState<MatchCandidate[]>([])
+  const [selectedMatches, setSelectedMatches] = useState<Set<number>>(new Set())
+  const [showReconciliation, setShowReconciliation] = useState(false)
+
+  /** Step 2 -> 3: process import with dedup check against DB */
   const goToStep3 = useCallback(async () => {
-    if (!file) return
+    if (!file || !containerId) return
     setIsProcessing(true)
     try {
       const profile = buildEffectiveProfile()
-      const result = await processCSVImport(file, profile)
+
+      // Step A: Parse CSV first (without dedup) to get all hashes
+      const rawResult = await processCSVImport(file, profile)
+
+      // Step B: Collect unique hashes from parsed rows
+      const allHashes = [...new Set(rawResult.parsedRows.map(r => r.hash).filter(Boolean))]
+
+      // Step C: Check which hashes already exist in DB
+      let existingHashSet = new Set<string>()
+      if (allHashes.length > 0) {
+        try {
+          const { existingHashes } = await transactionsApi.checkHashes(containerId, allHashes)
+          existingHashSet = new Set(existingHashes)
+        } catch (err) {
+          console.warn('Hash check failed, proceeding without DB dedup:', err)
+        }
+      }
+
+      // Step D: Re-process with existing hashes for accurate dedup
+      const result = await processCSVImport(file, profile, existingHashSet)
+
+      // Step E: Find reconciliation candidates (manual transactions matching imports)
+      const readyRows = result.parsedRows.filter(r => r.status === 'ready')
+      let matches: MatchCandidate[] = []
+      if (readyRows.length > 0) {
+        try {
+          const candidates = readyRows.map(r => ({
+            date: r.mapped.date,
+            amount: r.mapped.amount,
+            description: r.mapped.description,
+          }))
+          const { manualTransactions } = await transactionsApi.findMatches(containerId, candidates)
+
+          // Client-side matching algorithm
+          for (const row of readyRows) {
+            for (const manual of manualTransactions) {
+              const score = scoreMatch(row, manual as Record<string, unknown>)
+              if (score.score >= 60) {
+                matches.push({
+                  csvRowIndex: row.rowIndex,
+                  csvDescription: row.mapped.description,
+                  csvAmount: row.mapped.amount,
+                  csvDate: row.mapped.date,
+                  manualTxId: manual.id as string,
+                  manualDescription: (manual.description as string) || '',
+                  manualAmount: parseFloat(manual.amount as string),
+                  manualDate: manual.date as string,
+                  score: score.score,
+                  reasons: score.reasons,
+                })
+              }
+            }
+          }
+
+          // Keep only the best match per CSV row and per manual transaction
+          const bestByRow = new Map<number, MatchCandidate>()
+          const bestByManual = new Map<string, MatchCandidate>()
+          matches.sort((a, b) => b.score - a.score)
+          for (const m of matches) {
+            if (!bestByRow.has(m.csvRowIndex) && !bestByManual.has(m.manualTxId)) {
+              bestByRow.set(m.csvRowIndex, m)
+              bestByManual.set(m.manualTxId, m)
+            }
+          }
+          matches = [...bestByRow.values()]
+        } catch (err) {
+          console.warn('Reconciliation matching failed:', err)
+        }
+      }
+
+      setMatchCandidates(matches)
+      // Auto-select high-confidence matches
+      setSelectedMatches(new Set(matches.filter(m => m.score >= 85).map(m => m.csvRowIndex)))
+      setShowReconciliation(matches.length > 0)
       setPreview(result)
       setStep(3)
     } catch (err) {
@@ -419,23 +593,90 @@ export function ImportData() {
     } finally {
       setIsProcessing(false)
     }
-  }, [file, buildEffectiveProfile])
+  }, [file, containerId, buildEffectiveProfile])
 
-  /** Step 3 -> 4: perform import (mock) */
-  const performImport = useCallback(() => {
-    if (!preview) return
+  // --- Import in progress flag ---
+  const [isImporting, setIsImporting] = useState(false)
+  const queryClient = useQueryClient()
 
-    // In a real app, we'd call convertToTransactions and save to DB
-    const readyRows = preview.parsedRows.filter(r => r.status === 'ready')
-    const _transactions = convertToTransactions(readyRows, containerId, 'csv_import')
+  /** Step 3 -> 4: perform import with reconciliation */
+  const performImport = useCallback(async () => {
+    if (!preview || isImporting) return
 
-    setImportResult({
-      imported: preview.readyCount,
-      duplicates: preview.duplicateCount,
-      errors: preview.errorCount,
-    })
-    setStep(4)
-  }, [preview, containerId])
+    // Filter out rows that will be reconciled (matched to existing manual transactions)
+    const reconciledRowIndices = new Set(
+      matchCandidates
+        .filter(m => selectedMatches.has(m.csvRowIndex))
+        .map(m => m.csvRowIndex)
+    )
+
+    const readyRows = preview.parsedRows.filter(
+      r => r.status === 'ready' && !reconciledRowIndices.has(r.rowIndex)
+    )
+    const transactions = convertToTransactions(readyRows, containerId, 'csv_import')
+
+    setIsImporting(true)
+    try {
+      // Step A: Reconcile matched transactions (keep manual, copy dedup fields from CSV)
+      let reconciledCount = 0
+      if (selectedMatches.size > 0) {
+        const pairs = matchCandidates
+          .filter(m => selectedMatches.has(m.csvRowIndex))
+          .map(m => {
+            // We need to create a temporary import of the CSV row to get its external_hash,
+            // then reconcile. Instead, we update the manual tx with the hash directly.
+            const csvRow = preview.parsedRows.find(r => r.rowIndex === m.csvRowIndex)
+            return { keepId: m.manualTxId, hash: csvRow?.hash || '' }
+          })
+
+        // For each reconciliation, update the manual transaction with the CSV hash
+        for (const pair of pairs) {
+          if (!pair.hash) continue
+          try {
+            await transactionsApi.update(pair.keepId, {
+              externalHash: pair.hash,
+            } as never)
+            reconciledCount++
+          } catch {
+            // Silently continue if one fails
+          }
+        }
+      }
+
+      // Step B: Import remaining (non-reconciled) transactions
+      let importResult: { inserted: number; failed: number; skippedDuplicates: number; total: number; errors?: string[] } = { inserted: 0, failed: 0, skippedDuplicates: 0, total: 0 }
+      if (transactions.length > 0) {
+        importResult = await transactionsApi.batchCreate(transactions)
+      }
+
+      // Invalidate caches
+      queryClient.invalidateQueries({ queryKey: ['transactions'] })
+      queryClient.invalidateQueries({ queryKey: ['stats'] })
+
+      setImportResult({
+        imported: importResult.inserted,
+        duplicates: preview.duplicateCount,
+        skippedDuplicates: importResult.skippedDuplicates,
+        errors: importResult.failed + preview.errorCount,
+        errorMessages: importResult.errors,
+        reconciled: reconciledCount,
+      })
+      setStep(4)
+    } catch (err) {
+      console.error('Import failed:', err)
+      const message = err instanceof Error ? err.message : 'Errore sconosciuto'
+      setImportResult({
+        imported: 0,
+        duplicates: preview.duplicateCount,
+        skippedDuplicates: 0,
+        errors: preview.readyCount + preview.errorCount,
+        errorMessages: [message],
+      })
+      setStep(4)
+    } finally {
+      setIsImporting(false)
+    }
+  }, [preview, containerId, isImporting, queryClient, matchCandidates, selectedMatches])
 
   /** Reset wizard */
   const resetWizard = useCallback(() => {
@@ -451,11 +692,14 @@ export function ImportData() {
       date: '',
       description: '',
       amount: '',
+      amountIn: '',
+      amountOut: '',
       currency: '',
       valueDate: '',
       externalId: '',
       notes: '',
     })
+    setCustomProfile(p => ({ ...p, separateAmountColumns: false }))
     if (fileInputRef.current) fileInputRef.current.value = ''
   }, [])
 
@@ -464,11 +708,14 @@ export function ImportData() {
   // ============================================================
 
   const step1Valid = file !== null && containerId !== ''
+  const amountValid = customProfile.separateAmountColumns
+    ? columnMapping.amountIn !== '' && columnMapping.amountOut !== ''
+    : columnMapping.amount !== ''
   const step2Valid =
     profileSelection !== null &&
     columnMapping.date !== '' &&
     columnMapping.description !== '' &&
-    columnMapping.amount !== ''
+    amountValid
 
   // ============================================================
   // RENDER
@@ -851,6 +1098,21 @@ export function ImportData() {
                     <span className="text-sm text-zinc-300">Importo invertito</span>
                   </label>
                 </div>
+
+                {/* Separate amount columns */}
+                <div className="flex items-end">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={customProfile.separateAmountColumns}
+                      onChange={(e) =>
+                        setCustomProfile((p) => ({ ...p, separateAmountColumns: e.target.checked }))
+                      }
+                      className="h-4 w-4 rounded border-zinc-600 bg-zinc-800 text-energy-500 focus:ring-energy-500"
+                    />
+                    <span className="text-sm text-zinc-300">Colonne separate Entrate/Uscite</span>
+                  </label>
+                </div>
               </div>
             </div>
           )}
@@ -860,9 +1122,14 @@ export function ImportData() {
             <h2 className="mb-4 text-lg font-semibold text-zinc-100">Mappatura Colonne</h2>
             <p className="mb-4 text-xs text-zinc-500">
               Associa le colonne del CSV ai campi del sistema. I campi con * sono obbligatori.
+              {customProfile.separateAmountColumns && (
+                <span className="ml-1 text-energy-400">
+                  Modalità colonne separate attiva: mappa le colonne Accrediti e Addebiti.
+                </span>
+              )}
             </p>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {MAPPING_FIELDS.map(({ key, label, required }) => (
+              {(customProfile.separateAmountColumns ? MAPPING_FIELDS_SPLIT : MAPPING_FIELDS_SINGLE).map(({ key, label, required }) => (
                 <div key={key}>
                   <label className="mb-1 block text-xs font-medium text-zinc-400">
                     {label}
@@ -931,7 +1198,7 @@ export function ImportData() {
       {step === 3 && preview && (
         <div className="space-y-6">
           {/* Summary cards */}
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
             <SummaryCard
               label="Totale righe"
               value={preview.totalRows}
@@ -940,15 +1207,21 @@ export function ImportData() {
             />
             <SummaryCard
               label="Pronte"
-              value={preview.readyCount}
+              value={preview.readyCount - matchCandidates.filter(m => selectedMatches.has(m.csvRowIndex)).length}
               color="text-green-400"
               bg="bg-green-500/10"
             />
             <SummaryCard
-              label="Duplicati"
+              label="Gia' importate"
               value={preview.duplicateCount}
               color="text-amber-400"
               bg="bg-amber-500/10"
+            />
+            <SummaryCard
+              label="Riconciliabili"
+              value={matchCandidates.length}
+              color="text-blue-400"
+              bg="bg-blue-500/10"
             />
             <SummaryCard
               label="Errori"
@@ -957,6 +1230,109 @@ export function ImportData() {
               bg="bg-red-500/10"
             />
           </div>
+
+          {/* Dedup info banner */}
+          {preview.duplicateCount > 0 && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-6 py-4">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="h-5 w-5 text-amber-400" />
+                <p className="text-sm text-zinc-200">
+                  <span className="font-semibold text-amber-400">{preview.duplicateCount} righe duplicate</span>
+                  {' '}rilevate nel database — saranno saltate automaticamente.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Reconciliation section */}
+          {matchCandidates.length > 0 && (
+            <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 overflow-hidden">
+              <button
+                onClick={() => setShowReconciliation(!showReconciliation)}
+                className="flex w-full items-center justify-between px-6 py-4 text-left"
+              >
+                <div className="flex items-center gap-2">
+                  <Link2 className="h-5 w-5 text-blue-400" />
+                  <div>
+                    <p className="text-sm font-semibold text-blue-400">
+                      Riconciliazione: {matchCandidates.length} corrispondenze trovate
+                    </p>
+                    <p className="text-xs text-zinc-400">
+                      Transazioni gia' inserite manualmente che corrispondono a righe del CSV.
+                      {selectedMatches.size > 0 && ` ${selectedMatches.size} selezionate per riconciliazione.`}
+                    </p>
+                  </div>
+                </div>
+                <ChevronRight className={cn('h-4 w-4 text-blue-400 transition-transform', showReconciliation && 'rotate-90')} />
+              </button>
+              {showReconciliation && (
+                <div className="border-t border-blue-500/20 px-6 py-4 space-y-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs text-zinc-500">
+                      Le righe selezionate NON verranno importate: la transazione manuale esistente verra' aggiornata con l'hash dedup.
+                    </p>
+                    <button
+                      onClick={() => {
+                        if (selectedMatches.size === matchCandidates.length) {
+                          setSelectedMatches(new Set())
+                        } else {
+                          setSelectedMatches(new Set(matchCandidates.map(m => m.csvRowIndex)))
+                        }
+                      }}
+                      className="text-xs text-blue-400 hover:text-blue-300 whitespace-nowrap ml-4"
+                    >
+                      {selectedMatches.size === matchCandidates.length ? 'Deseleziona tutti' : 'Seleziona tutti'}
+                    </button>
+                  </div>
+                  {matchCandidates.map((match) => (
+                    <label
+                      key={match.csvRowIndex}
+                      className={cn(
+                        'flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors',
+                        selectedMatches.has(match.csvRowIndex)
+                          ? 'border-blue-500/50 bg-blue-500/5'
+                          : 'border-zinc-700 bg-zinc-800/50 hover:border-zinc-600',
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedMatches.has(match.csvRowIndex)}
+                        onChange={() => {
+                          const next = new Set(selectedMatches)
+                          if (next.has(match.csvRowIndex)) next.delete(match.csvRowIndex)
+                          else next.add(match.csvRowIndex)
+                          setSelectedMatches(next)
+                        }}
+                        className="mt-1 h-4 w-4 rounded border-zinc-600 bg-zinc-800 text-blue-500 focus:ring-blue-500"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge variant={match.score >= 85 ? 'success' : match.score >= 70 ? 'warning' : 'info'} size="sm">
+                            {match.score}%
+                          </Badge>
+                          {match.reasons.map((r, i) => (
+                            <span key={i} className="text-[10px] text-zinc-500">{r}</span>
+                          ))}
+                        </div>
+                        <div className="mt-1 grid grid-cols-2 gap-4 text-xs">
+                          <div>
+                            <p className="text-zinc-500 mb-0.5">CSV (importata)</p>
+                            <p className="text-zinc-300 truncate">{match.csvDescription}</p>
+                            <p className="text-zinc-400">{formatDate(match.csvDate)} &middot; {formatCurrency(match.csvAmount)}</p>
+                          </div>
+                          <div>
+                            <p className="text-zinc-500 mb-0.5">Manuale (esistente)</p>
+                            <p className="text-zinc-300 truncate">{match.manualDescription}</p>
+                            <p className="text-zinc-400">{formatDate(match.manualDate)} &middot; {formatCurrency(match.manualAmount)}</p>
+                          </div>
+                        </div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Preview table */}
           <div className="rounded-xl border border-zinc-800 bg-zinc-900 overflow-hidden">
@@ -980,9 +1356,10 @@ export function ImportData() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-800/50">
-                  {preview.parsedRows.map((row) => (
-                    <PreviewRow key={row.rowIndex} row={row} />
-                  ))}
+                  {preview.parsedRows.map((row) => {
+                    const isReconciled = matchCandidates.some(m => m.csvRowIndex === row.rowIndex && selectedMatches.has(m.csvRowIndex))
+                    return <PreviewRow key={row.rowIndex} row={row} isReconciled={isReconciled} />
+                  })}
                 </tbody>
               </table>
             </div>
@@ -998,17 +1375,27 @@ export function ImportData() {
               Indietro
             </button>
             <button
-              disabled={preview.readyCount === 0}
+              disabled={(preview.readyCount === 0 && selectedMatches.size === 0) || isImporting}
               onClick={performImport}
               className={cn(
                 'flex items-center gap-2 rounded-lg px-6 py-2.5 text-sm font-medium transition-colors',
-                preview.readyCount > 0
+                (preview.readyCount > 0 || selectedMatches.size > 0) && !isImporting
                   ? 'bg-energy-500 text-zinc-950 hover:bg-energy-400'
                   : 'cursor-not-allowed bg-zinc-800 text-zinc-600',
               )}
             >
-              Importa {preview.readyCount} transazioni
-              <ArrowRight className="h-4 w-4" />
+              {isImporting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Importazione in corso...
+                </>
+              ) : (
+                <>
+                  Importa {preview.readyCount - selectedMatches.size} transazioni
+                  {selectedMatches.size > 0 && ` + riconcilia ${selectedMatches.size}`}
+                  <ArrowRight className="h-4 w-4" />
+                </>
+              )}
             </button>
           </div>
         </div>
@@ -1017,22 +1404,44 @@ export function ImportData() {
       {/* ============================== STEP 4 ============================== */}
       {step === 4 && importResult && (
         <div className="flex flex-col items-center justify-center rounded-xl border border-zinc-800 bg-zinc-900 px-6 py-16">
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-energy-500/15">
-            <CheckCircle2 className="h-8 w-8 text-energy-400" />
-          </div>
-          <h2 className="mt-4 text-xl font-bold text-zinc-100">Importazione Completata</h2>
-          <p className="mt-2 text-sm text-zinc-400">
-            Le transazioni sono state importate con successo nel contenitore selezionato.
-          </p>
+          {(importResult.imported > 0 || (importResult.reconciled ?? 0) > 0) ? (
+            <>
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-energy-500/15">
+                <CheckCircle2 className="h-8 w-8 text-energy-400" />
+              </div>
+              <h2 className="mt-4 text-xl font-bold text-zinc-100">Importazione Completata</h2>
+              <p className="mt-2 text-sm text-zinc-400">
+                Le transazioni sono state importate nel contenitore selezionato.
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-red-500/15">
+                <XCircle className="h-8 w-8 text-red-400" />
+              </div>
+              <h2 className="mt-4 text-xl font-bold text-zinc-100">Importazione Fallita</h2>
+              <p className="mt-2 text-sm text-zinc-400">
+                Nessuna transazione importata. Controlla gli errori qui sotto.
+              </p>
+            </>
+          )}
 
           {/* Result summary */}
-          <div className="mt-8 flex gap-6">
+          <div className="mt-8 flex flex-wrap justify-center gap-6">
             <div className="text-center">
               <p className="text-2xl font-bold text-green-400">{importResult.imported}</p>
               <p className="text-xs text-zinc-500">Importate</p>
             </div>
+            {(importResult.reconciled ?? 0) > 0 && (
+              <div className="text-center">
+                <p className="text-2xl font-bold text-blue-400">{importResult.reconciled}</p>
+                <p className="text-xs text-zinc-500">Riconciliate</p>
+              </div>
+            )}
             <div className="text-center">
-              <p className="text-2xl font-bold text-amber-400">{importResult.duplicates}</p>
+              <p className="text-2xl font-bold text-amber-400">
+                {importResult.duplicates + importResult.skippedDuplicates}
+              </p>
               <p className="text-xs text-zinc-500">Duplicati saltati</p>
             </div>
             <div className="text-center">
@@ -1040,6 +1449,32 @@ export function ImportData() {
               <p className="text-xs text-zinc-500">Errori</p>
             </div>
           </div>
+
+          {/* Reconciliation info */}
+          {(importResult.reconciled ?? 0) > 0 && (
+            <div className="mt-6 w-full max-w-lg rounded-lg border border-blue-500/30 bg-blue-500/5 p-4">
+              <div className="flex items-center gap-2">
+                <Link2 className="h-4 w-4 text-blue-400" />
+                <p className="text-sm text-zinc-200">
+                  <span className="font-medium text-blue-400">{importResult.reconciled} transazioni riconciliate</span>
+                  {' '}— le transazioni manuali esistenti sono state aggiornate con l'hash dedup.
+                  I futuri import non creeranno duplicati.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Error details */}
+          {importResult.errorMessages && importResult.errorMessages.length > 0 && (
+            <div className="mt-6 w-full max-w-lg rounded-lg border border-red-500/30 bg-red-500/5 p-4">
+              <p className="mb-2 text-sm font-medium text-red-400">Dettaglio errori:</p>
+              {importResult.errorMessages.map((msg, i) => (
+                <p key={i} className="text-xs text-zinc-400 break-all">
+                  {msg}
+                </p>
+              ))}
+            </div>
+          )}
 
           {/* Actions */}
           <div className="mt-8 flex gap-4">
@@ -1086,9 +1521,10 @@ function SummaryCard({
   )
 }
 
-function PreviewRow({ row }: { row: ParsedRow }) {
-  const rowBg =
-    row.status === 'ready'
+function PreviewRow({ row, isReconciled }: { row: ParsedRow; isReconciled?: boolean }) {
+  const rowBg = isReconciled
+    ? 'bg-blue-500/[0.03]'
+    : row.status === 'ready'
       ? 'bg-green-500/[0.03]'
       : row.status === 'duplicate'
         ? 'bg-amber-500/[0.03]'
@@ -1096,8 +1532,12 @@ function PreviewRow({ row }: { row: ParsedRow }) {
           ? 'bg-red-500/[0.03]'
           : ''
 
-  const statusBadge =
-    row.status === 'ready' ? (
+  const statusBadge = isReconciled ? (
+    <Badge variant="info" size="sm">
+      <Link2 className="mr-1 h-3 w-3" />
+      MATCH
+    </Badge>
+  ) : row.status === 'ready' ? (
       <Badge variant="success" size="sm">
         <CheckCircle2 className="mr-1 h-3 w-3" />
         OK
