@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { ChevronDown, X, Search, Check } from 'lucide-react'
+import { ChevronDown, X, Search, Check, Plus } from 'lucide-react'
 
 // ── Types ───────────────────────────────────────────────────
 
@@ -25,6 +25,8 @@ interface SearchableSelectProps extends BaseProps {
   onChange: (value: string) => void
   allowEmpty?: boolean
   emptyLabel?: string
+  onCreateNew?: (name: string) => void
+  createLabel?: string
 }
 
 export function SearchableSelect({
@@ -36,6 +38,8 @@ export function SearchableSelect({
   emptyLabel = '— Nessuno —',
   disabled = false,
   className = '',
+  onCreateNew,
+  createLabel = 'Crea',
 }: SearchableSelectProps) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
@@ -126,8 +130,22 @@ export function SearchableSelect({
                 <span className={!value ? '' : 'pl-5'}>{emptyLabel}</span>
               </button>
             )}
-            {filtered.length === 0 && (
+            {filtered.length === 0 && !onCreateNew && (
               <div className="px-3 py-4 text-center text-xs text-zinc-500">Nessun risultato</div>
+            )}
+            {filtered.length === 0 && onCreateNew && search.trim() && (
+              <button
+                type="button"
+                onClick={() => {
+                  onCreateNew(search.trim())
+                  setOpen(false)
+                  setSearch('')
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-energy-400 hover:bg-zinc-700 transition-colors"
+              >
+                <Plus className="h-3.5 w-3.5 shrink-0" />
+                <span>{createLabel} &ldquo;{search.trim()}&rdquo;</span>
+              </button>
             )}
             {filtered.map((option) => (
               <button
@@ -150,6 +168,20 @@ export function SearchableSelect({
                 <span className="truncate">{option.label}</span>
               </button>
             ))}
+            {filtered.length > 0 && onCreateNew && search.trim() && (
+              <button
+                type="button"
+                onClick={() => {
+                  onCreateNew(search.trim())
+                  setOpen(false)
+                  setSearch('')
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-energy-400 hover:bg-zinc-700 transition-colors border-t border-zinc-700"
+              >
+                <Plus className="h-3.5 w-3.5 shrink-0" />
+                <span>{createLabel} &ldquo;{search.trim()}&rdquo;</span>
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -163,6 +195,8 @@ interface SearchableMultiSelectProps extends BaseProps {
   value: string[]
   onChange: (value: string[]) => void
   maxDisplay?: number
+  onCreateNew?: (name: string) => void
+  createLabel?: string
 }
 
 export function SearchableMultiSelect({
@@ -173,6 +207,8 @@ export function SearchableMultiSelect({
   disabled = false,
   className = '',
   maxDisplay = 3,
+  onCreateNew,
+  createLabel = 'Crea',
 }: SearchableMultiSelectProps) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
@@ -272,8 +308,21 @@ export function SearchableMultiSelect({
           </div>
 
           <div className="overflow-y-auto max-h-48">
-            {filtered.length === 0 && (
+            {filtered.length === 0 && !onCreateNew && (
               <div className="px-3 py-4 text-center text-xs text-zinc-500">Nessun risultato</div>
+            )}
+            {filtered.length === 0 && onCreateNew && search.trim() && (
+              <button
+                type="button"
+                onClick={() => {
+                  onCreateNew(search.trim())
+                  setSearch('')
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-energy-400 hover:bg-zinc-700 transition-colors"
+              >
+                <Plus className="h-3.5 w-3.5 shrink-0" />
+                <span>{createLabel} &ldquo;{search.trim()}&rdquo;</span>
+              </button>
             )}
             {filtered.map((option) => {
               const isSelected = value.includes(option.value)
@@ -299,6 +348,19 @@ export function SearchableMultiSelect({
                 </button>
               )
             })}
+            {filtered.length > 0 && onCreateNew && search.trim() && (
+              <button
+                type="button"
+                onClick={() => {
+                  onCreateNew(search.trim())
+                  setSearch('')
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-energy-400 hover:bg-zinc-700 transition-colors border-t border-zinc-700"
+              >
+                <Plus className="h-3.5 w-3.5 shrink-0" />
+                <span>{createLabel} &ldquo;{search.trim()}&rdquo;</span>
+              </button>
+            )}
           </div>
         </div>
       )}

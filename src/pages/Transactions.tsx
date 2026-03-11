@@ -36,6 +36,9 @@ import {
   useCreateTransaction,
   useUpdateTransaction,
   useDeleteTransaction,
+  useCreateCounterparty,
+  useCreateSubject,
+  useCreateTag,
 } from '@/lib/hooks'
 import { transactionsApi } from '@/lib/api'
 import { useQueryClient } from '@tanstack/react-query'
@@ -125,6 +128,9 @@ function TransactionModal({
   tags,
   isSaving,
   saveError,
+  onCreateCounterparty,
+  onCreateSubject,
+  onCreateTag,
 }: {
   onClose: () => void
   onSave: (data: Record<string, unknown>) => void
@@ -136,6 +142,9 @@ function TransactionModal({
   tags: Tag[]
   isSaving?: boolean
   saveError?: string | null
+  onCreateCounterparty?: (name: string) => void
+  onCreateSubject?: (name: string) => void
+  onCreateTag?: (name: string) => void
 }) {
   const isEdit = !!existing
   const isExistingTransfer = existing && (existing.type === 'transfer_out' || existing.type === 'transfer_in')
@@ -332,6 +341,8 @@ function TransactionModal({
                   placeholder="Controparte..."
                   allowEmpty
                   emptyLabel="— Nessuna —"
+                  onCreateNew={onCreateCounterparty}
+                  createLabel="Crea controparte"
                 />
               </div>
             </>
@@ -360,6 +371,8 @@ function TransactionModal({
                   placeholder="Soggetto..."
                   allowEmpty
                   emptyLabel="— Nessuno —"
+                  onCreateNew={onCreateSubject}
+                  createLabel="Crea soggetto"
                 />
               </div>
               {form.sharedWithSubjectId && (
@@ -372,17 +385,17 @@ function TransactionModal({
           )}
 
           {/* Tags */}
-          {tags.length > 0 && (
-            <div>
-              <label className={labelCls}>Tag</label>
-              <SearchableMultiSelect
-                value={form.tagIds}
-                onChange={(ids) => setForm({ ...form, tagIds: ids })}
-                options={tags.filter(t => t.isActive).map(t => ({ value: t.id, label: t.name, color: t.color }))}
-                placeholder="Seleziona tag..."
-              />
-            </div>
-          )}
+          <div>
+            <label className={labelCls}>Tag</label>
+            <SearchableMultiSelect
+              value={form.tagIds}
+              onChange={(ids) => setForm({ ...form, tagIds: ids })}
+              options={tags.filter(t => t.isActive).map(t => ({ value: t.id, label: t.name, color: t.color }))}
+              placeholder="Seleziona tag..."
+              onCreateNew={onCreateTag}
+              createLabel="Crea tag"
+            />
+          </div>
 
           {/* Notes */}
           <div>
@@ -489,7 +502,23 @@ export function Transactions() {
   const createMutation = useCreateTransaction()
   const updateMutation = useUpdateTransaction()
   const deleteMutation = useDeleteTransaction()
+  const createCounterpartyMutation = useCreateCounterparty()
+  const createSubjectMutation = useCreateSubject()
+  const createTagMutation = useCreateTag()
   const queryClient = useQueryClient()
+
+  // Inline-create callbacks for dropdowns
+  const handleCreateCounterparty = useCallback((name: string) => {
+    createCounterpartyMutation.mutate({ name, isActive: true })
+  }, [createCounterpartyMutation])
+
+  const handleCreateSubject = useCallback((name: string) => {
+    createSubjectMutation.mutate({ name, role: 'partner' as const, isActive: true })
+  }, [createSubjectMutation])
+
+  const handleCreateTag = useCallback((name: string) => {
+    createTagMutation.mutate({ name, type: 'custom' as const, isActive: true })
+  }, [createTagMutation])
 
   // Transfer-specific operation state (not using react-query mutations)
   const [transferSaving, setTransferSaving] = useState(false)
@@ -1142,6 +1171,9 @@ export function Transactions() {
           tags={tags}
           isSaving={createMutation.isPending || transferSaving}
           saveError={createErrorMsg}
+          onCreateCounterparty={handleCreateCounterparty}
+          onCreateSubject={handleCreateSubject}
+          onCreateTag={handleCreateTag}
         />
       )}
 
@@ -1162,6 +1194,9 @@ export function Transactions() {
           tags={tags}
           isSaving={updateMutation.isPending || transferSaving}
           saveError={updateErrorMsg}
+          onCreateCounterparty={handleCreateCounterparty}
+          onCreateSubject={handleCreateSubject}
+          onCreateTag={handleCreateTag}
         />
       )}
     </div>
