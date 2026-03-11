@@ -25,6 +25,9 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Extracted import data (temporary)
+data/extracted
+
 # OS files
 .DS_Store
 Thumbs.db
