@@ -16,6 +16,8 @@ import {
   budgetApi,
   statsApi,
   smartRulesApi,
+  installmentPlansApi,
+  importProfilesApi,
   type TransactionListResponse,
   type BudgetPeriodWithAllocations,
 } from './api'
@@ -28,6 +30,8 @@ import type {
   Transaction,
   Recurrence,
   SmartRule,
+  InstallmentPlan,
+  ImportProfile,
 } from '@/types'
 
 // ── Query keys ──────────────────────────────────────────────
@@ -42,6 +46,8 @@ export const queryKeys = {
   budget: ['budget'] as const,
   stats: ['stats'] as const,
   smartRules: ['smart-rules'] as const,
+  installmentPlans: ['installment-plans'] as const,
+  importProfiles: ['import-profiles'] as const,
 }
 
 // ── Subjects ────────────────────────────────────────────────
@@ -429,6 +435,82 @@ export function useDeleteSmartRule() {
     mutationFn: (id: string) => smartRulesApi.delete(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.smartRules })
+    },
+  })
+}
+
+// ── Installment Plans ──────────────────────────────────────
+
+export function useInstallmentPlans() {
+  return useQuery({
+    queryKey: queryKeys.installmentPlans,
+    queryFn: async () => {
+      const data = await installmentPlansApi.list()
+      return snakeToCamel<InstallmentPlan[]>(data as never)
+    },
+  })
+}
+
+export function useCreateInstallmentPlan() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data: Partial<InstallmentPlan> & { startDate?: string }) =>
+      installmentPlansApi.create(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.installmentPlans })
+    },
+  })
+}
+
+export function useUpdateInstallmentPlan() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<InstallmentPlan> }) =>
+      installmentPlansApi.update(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.installmentPlans })
+    },
+  })
+}
+
+export function useDeleteInstallmentPlan() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => installmentPlansApi.delete(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.installmentPlans })
+    },
+  })
+}
+
+// ── Import Profiles ────────────────────────────────────────
+
+export function useImportProfiles() {
+  return useQuery({
+    queryKey: queryKeys.importProfiles,
+    queryFn: async () => {
+      const data = await importProfilesApi.list()
+      return snakeToCamel<ImportProfile[]>(data as never)
+    },
+  })
+}
+
+export function useCreateImportProfile() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data: Partial<ImportProfile>) => importProfilesApi.create(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.importProfiles })
+    },
+  })
+}
+
+export function useDeleteImportProfile() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => importProfilesApi.delete(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.importProfiles })
     },
   })
 }

@@ -6,6 +6,8 @@ import type {
   Transaction,
   Recurrence,
   SmartRule,
+  InstallmentPlan,
+  ImportProfile,
 } from '@/types'
 
 // ── Base URL: /api served by Vercel serverless functions ──
@@ -274,6 +276,32 @@ export const smartRulesApi = {
     api.post<AutoTagResult>('/smart-rules', { _action: 'auto-tag', dryRun, limit }),
   suggestRules: () =>
     api.post<{ suggestions: RuleSuggestion[] }>('/smart-rules', { _action: 'suggest-rules' }),
+}
+
+// -- Installment Plans --
+export const installmentPlansApi = {
+  list: () => api.get<InstallmentPlan[]>('/installment-plans'),
+  get: (id: string) => api.get<InstallmentPlan>(`/installment-plans/${id}`),
+  create: (data: Partial<InstallmentPlan> & { startDate?: string }) =>
+    api.post<InstallmentPlan>('/installment-plans', data),
+  update: (id: string, data: Partial<InstallmentPlan>) =>
+    api.post<InstallmentPlan>('/installment-plans', { ...data, _action: 'update', id }),
+  delete: (id: string) =>
+    api.post<{ deleted: boolean }>('/installment-plans', { _action: 'delete', id }),
+  payInstallment: (installmentId: string, transactionId?: string) =>
+    api.post('/installment-plans', { _action: 'pay-installment', installmentId, transactionId }),
+}
+
+// -- Import Profiles --
+export const importProfilesApi = {
+  list: () => api.get<ImportProfile[]>('/import-profiles'),
+  get: (id: string) => api.get<ImportProfile>(`/import-profiles/${id}`),
+  create: (data: Partial<ImportProfile>) =>
+    api.post<ImportProfile>('/import-profiles', data),
+  update: (id: string, data: Partial<ImportProfile>) =>
+    api.post<ImportProfile>('/import-profiles', { ...data, _action: 'update', id }),
+  delete: (id: string) =>
+    api.post<{ deleted: boolean }>('/import-profiles', { _action: 'delete', id }),
 }
 
 // -- Stats (Dashboard) --
