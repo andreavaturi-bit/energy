@@ -8,34 +8,36 @@ import {
   AlertTriangle,
   X,
   Trash2,
+  Loader2,
+  Wallet,
 } from 'lucide-react'
-import { useTags, useBudgetPeriods, useCreateBudgetPeriod, useCreateBudgetAllocation, useDeleteBudgetAllocation } from '@/lib/hooks'
+import {
+  useTags,
+  useBudgetPeriods,
+  useCreateBudgetPeriod,
+  useCreateBudgetAllocation,
+  useDeleteBudgetAllocation,
+  useDeleteBudgetPeriod,
+} from '@/lib/hooks'
+import { EmptyState } from '@/components/ui/EmptyState'
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-interface BudgetRow {
-  id: string
-  category: string
-  tagId?: string
-  allocated: number
-  actual: number
-}
-
-interface BudgetPeriodData {
+// After snakeToCamel, budget period data arrives in camelCase
+interface BudgetPeriodView {
   id: string
   name: string
   startDate: string
   endDate: string
-  allocations: BudgetRow[]
+  isActive: boolean
+  allocations: Array<{
+    id: string
+    periodId: string
+    tagId: string | null
+    allocatedAmount: string
+    currency: string
+    tagName?: string
+    tagColor?: string
+  }>
 }
-
-// ---------------------------------------------------------------------------
-// Initial data — empty, no mock data
-// ---------------------------------------------------------------------------
-
-const initialPeriods: BudgetPeriodData[] = []
 
 // ---------------------------------------------------------------------------
 // Period Modal
@@ -44,9 +46,11 @@ const initialPeriods: BudgetPeriodData[] = []
 function PeriodModal({
   onClose,
   onSave,
+  isPending,
 }: {
   onClose: () => void
-  onSave: (period: BudgetPeriodData) => void
+  onSave: (data: { name: string; startDate: string; endDate: string }) => void
+  isPending: boolean
 }) {
   const [form, setForm] = useState({
     name: '',
@@ -56,15 +60,11 @@ function PeriodModal({
 
   function handleSave() {
     if (!form.name.trim() || !form.startDate || !form.endDate) return
-
-    const period: BudgetPeriodData = {
-      id: `bp-${Date.now()}`,
+    onSave({
       name: form.name.trim(),
       startDate: form.startDate,
       endDate: form.endDate,
-      allocations: [],
-    }
-    onSave(period)
+    })
   }
 
   const inputCls = 'w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500'
@@ -104,10 +104,16 @@ function PeriodModal({
           </button>
           <button
             onClick={handleSave}
-            disabled={!form.name.trim() || !form.startDate || !form.endDate}
+            disabled={!form.name.trim() || !form.startDate || !form.endDate || isPending}
             className="rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            Crea Periodo
+            {isPending ? (
+              <span className="flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" /> Creazione...
+              </span>
+            ) : (
+              'Crea Periodo'
+            )}
           </button>
         </div>
       </div>
@@ -123,10 +129,12 @@ function AllocationModal({
   onClose,
   onSave,
   categoryTags,
+  isPending,
 }: {
   onClose: () => void
-  onSave: (row: BudgetRow) => void
+  onSave: (data: { tagId?: string; category: string; allocated: number }) => void
   categoryTags: Array<{ id: string; name: string }>
+  isPending: boolean
 }) {
 
   const [form, setForm] = useState({
@@ -143,14 +151,11 @@ function AllocationModal({
     const category = tag ? tag.name : form.customCategory.trim()
     if (!category) return
 
-    const row: BudgetRow = {
-      id: `ba-${Date.now()}`,
-      category,
+    onSave({
       tagId: tag?.id,
+      category,
       allocated,
-      actual: 0,
-    }
-    onSave(row)
+    })
   }
 
   const inputCls = 'w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500'
@@ -170,7 +175,7 @@ function AllocationModal({
           <div>
             <label className={labelCls}>Categoria (da tag)</label>
             <select value={form.tagId} onChange={(e) => setForm({ ...form, tagId: e.target.value })} className={inputCls}>
-              <option value="">— Categoria libera —</option>
+              <option value="">- Categoria libera -</option>
               {categoryTags.map((t) => (
                 <option key={t.id} value={t.id}>{t.name}</option>
               ))}
@@ -196,10 +201,16 @@ function AllocationModal({
           </button>
           <button
             onClick={handleSave}
-            disabled={(!form.tagId && !form.customCategory.trim()) || !form.allocated || parseFloat(form.allocated) <= 0}
+            disabled={(!form.tagId && !form.customCategory.trim()) || !form.allocated || parseFloat(form.allocated) <= 0 || isPending}
             className="rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            Aggiungi
+            {isPending ? (
+              <span className="flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" /> Salvataggio...
+              </span>
+            ) : (
+              'Aggiungi'
+            )}
           </button>
         </div>
       </div>
@@ -213,21 +224,36 @@ function AllocationModal({
 
 export function Budget() {
   const { data: tags = [] } = useTags()
+  const { data: periodsRaw = [], isLoading } = useBudgetPeriods()
+  const periodsData = periodsRaw as unknown as BudgetPeriodView[]
+  const createPeriod = useCreateBudgetPeriod()
+  const createAllocation = useCreateBudgetAllocation()
+  const deleteAllocationMutation = useDeleteBudgetAllocation()
+  const deletePeriodMutation = useDeleteBudgetPeriod()
+
   const categoryTags = tags.filter((t) => t.type === 'category')
-  const [periods, setPeriods] = useState<BudgetPeriodData[]>(initialPeriods)
   const [currentIndex, setCurrentIndex] = useState(0)
   const [showPeriodModal, setShowPeriodModal] = useState(false)
   const [showAllocationModal, setShowAllocationModal] = useState(false)
 
-  const currentPeriod = periods[currentIndex]
+  const currentPeriod = periodsData[currentIndex]
 
-  const allocations = currentPeriod?.allocations ?? []
+  const allocations = useMemo(() => {
+    if (!currentPeriod?.allocations) return []
+    return currentPeriod.allocations.map((a) => ({
+      id: a.id,
+      category: a.tagName || 'Senza categoria',
+      tagId: a.tagId,
+      allocated: parseFloat(a.allocatedAmount),
+      actual: 0, // TODO: calcola da transazioni reali per tag e periodo
+    }))
+  }, [currentPeriod])
 
   const totalAllocated = useMemo(() => allocations.reduce((s, a) => s + a.allocated, 0), [allocations])
   const totalActual = useMemo(() => allocations.reduce((s, a) => s + a.actual, 0), [allocations])
 
   function goNext() {
-    if (currentIndex < periods.length - 1) setCurrentIndex(currentIndex + 1)
+    if (currentIndex < periodsData.length - 1) setCurrentIndex(currentIndex + 1)
   }
 
   function goPrev() {
@@ -235,19 +261,56 @@ export function Budget() {
   }
 
   function handleDeleteAllocation(id: string) {
-    setPeriods((prev) =>
-      prev.map((p, i) =>
-        i === currentIndex
-          ? { ...p, allocations: p.allocations.filter((a) => a.id !== id) }
-          : p
-      )
-    )
+    if (!confirm('Eliminare questa allocazione?')) return
+    deleteAllocationMutation.mutate(id)
+  }
+
+  function handleDeletePeriod() {
+    if (!currentPeriod) return
+    if (!confirm(`Eliminare il periodo "${currentPeriod.name}" e tutte le sue allocazioni?`)) return
+    deletePeriodMutation.mutate(currentPeriod.id, {
+      onSuccess: () => {
+        setCurrentIndex(0)
+      },
+    })
+  }
+
+  async function handleCreatePeriod(data: { name: string; startDate: string; endDate: string }) {
+    try {
+      await createPeriod.mutateAsync(data)
+      setCurrentIndex(0)
+      setShowPeriodModal(false)
+    } catch (err) {
+      console.error('Errore creazione periodo:', err)
+    }
+  }
+
+  async function handleCreateAllocation(data: { tagId?: string; category: string; allocated: number }) {
+    if (!currentPeriod) return
+    try {
+      await createAllocation.mutateAsync({
+        periodId: currentPeriod.id,
+        tagId: data.tagId,
+        allocatedAmount: String(data.allocated),
+      })
+      setShowAllocationModal(false)
+    } catch (err) {
+      console.error('Errore creazione allocazione:', err)
+    }
   }
 
   function formatDateIt(dateStr: string): string {
     if (!dateStr) return ''
     const [y, m, d] = dateStr.split('-')
     return `${d}/${m}/${y}`
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="h-8 w-8 animate-spin text-energy-400" />
+      </div>
+    )
   }
 
   if (!currentPeriod) {
@@ -268,17 +331,17 @@ export function Budget() {
             Nuovo Periodo
           </button>
         </div>
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-zinc-800 py-16 text-zinc-500">
-          <p className="text-sm">Nessun periodo budget. Crea il primo periodo per iniziare.</p>
-        </div>
+        <EmptyState
+          icon={Wallet}
+          title="Nessun periodo budget"
+          description="Crea il primo periodo per iniziare a pianificare le allocazioni di spesa"
+          action={{ label: 'Crea il primo periodo', onClick: () => setShowPeriodModal(true) }}
+        />
         {showPeriodModal && (
           <PeriodModal
             onClose={() => setShowPeriodModal(false)}
-            onSave={(period) => {
-              setPeriods((prev) => [period, ...prev])
-              setCurrentIndex(0)
-              setShowPeriodModal(false)
-            }}
+            onSave={handleCreatePeriod}
+            isPending={createPeriod.isPending}
           />
         )}
       </div>
@@ -295,13 +358,23 @@ export function Budget() {
             Pianifica e monitora le allocazioni di spesa per periodo
           </p>
         </div>
-        <button
-          onClick={() => setShowPeriodModal(true)}
-          className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors"
-        >
-          <Plus className="h-4 w-4" />
-          Nuovo Periodo
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleDeletePeriod}
+            disabled={deletePeriodMutation.isPending}
+            className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-400 hover:border-red-800 hover:text-red-400 transition-colors disabled:opacity-50"
+            title="Elimina periodo"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+          <button
+            onClick={() => setShowPeriodModal(true)}
+            className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors"
+          >
+            <Plus className="h-4 w-4" />
+            Nuovo Periodo
+          </button>
+        </div>
       </div>
 
       {/* Period selector */}
@@ -317,12 +390,12 @@ export function Budget() {
           <div className="text-center">
             <h2 className="text-lg font-semibold text-zinc-100">{currentPeriod.name}</h2>
             <p className="text-xs text-zinc-500">
-              {formatDateIt(currentPeriod.startDate)} — {formatDateIt(currentPeriod.endDate)}
+              {formatDateIt(currentPeriod.startDate)} - {formatDateIt(currentPeriod.endDate)}
             </p>
           </div>
           <button
             onClick={goNext}
-            disabled={currentIndex === periods.length - 1}
+            disabled={currentIndex === periodsData.length - 1}
             className="rounded-lg p-2 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-30 disabled:cursor-not-allowed"
           >
             <ChevronRight className="h-5 w-5" />
@@ -447,7 +520,8 @@ export function Budget() {
                       <td className="px-3 py-3">
                         <button
                           onClick={() => handleDeleteAllocation(row.id)}
-                          className="rounded p-1 text-zinc-600 hover:text-red-400 hover:bg-zinc-800 transition-colors"
+                          disabled={deleteAllocationMutation.isPending}
+                          className="rounded p-1 text-zinc-600 hover:text-red-400 hover:bg-zinc-800 transition-colors disabled:opacity-50"
                           title="Elimina allocazione"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
@@ -497,11 +571,8 @@ export function Budget() {
       {showPeriodModal && (
         <PeriodModal
           onClose={() => setShowPeriodModal(false)}
-          onSave={(period) => {
-            setPeriods((prev) => [period, ...prev])
-            setCurrentIndex(0)
-            setShowPeriodModal(false)
-          }}
+          onSave={handleCreatePeriod}
+          isPending={createPeriod.isPending}
         />
       )}
 
@@ -509,16 +580,8 @@ export function Budget() {
         <AllocationModal
           categoryTags={categoryTags}
           onClose={() => setShowAllocationModal(false)}
-          onSave={(row) => {
-            setPeriods((prev) =>
-              prev.map((p, i) =>
-                i === currentIndex
-                  ? { ...p, allocations: [...p.allocations, row] }
-                  : p
-              )
-            )
-            setShowAllocationModal(false)
-          }}
+          onSave={handleCreateAllocation}
+          isPending={createAllocation.isPending}
         />
       )}
     </div>
