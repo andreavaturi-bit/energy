@@ -359,22 +359,20 @@ function TransactionModal({
             />
           </div>
 
-          {/* Cost sharing — only for non-transfers */}
+          {/* Beneficiary — only for non-transfers */}
           {!isTransfer && (
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className={labelCls}>Condiviso con</label>
-                <SearchableSelect
-                  value={form.beneficiarySubjectId}
-                  onChange={(v) => setForm({ ...form, beneficiarySubjectId: v })}
-                  options={subjects.filter((s) => s.role === 'partner').map((s) => ({ value: s.id, label: s.name }))}
-                  placeholder="Soggetto..."
-                  allowEmpty
-                  emptyLabel="— Nessuno —"
-                  onCreateNew={onCreateSubject}
-                  createLabel="Crea soggetto"
-                />
-              </div>
+            <div>
+              <label className={labelCls}>Beneficiario</label>
+              <SearchableSelect
+                value={form.beneficiarySubjectId}
+                onChange={(v) => setForm({ ...form, beneficiarySubjectId: v })}
+                options={subjects.filter((s) => s.role === 'partner').map((s) => ({ value: s.id, label: s.name }))}
+                placeholder="Soggetto..."
+                allowEmpty
+                emptyLabel="— Nessuno —"
+                onCreateNew={onCreateSubject}
+                createLabel="Crea soggetto"
+              />
             </div>
           )}
 
