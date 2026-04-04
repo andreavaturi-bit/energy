@@ -176,6 +176,17 @@ export const transactionsApi = {
       '/transactions?action=reconcile-bulk',
       { pairs },
     ),
+  /** Split a transaction into multiple child allocations */
+  split: (parentId: string, children: Array<{
+    description?: string
+    amount: string
+    tagIds?: string[]
+    beneficiarySubjectId?: string | null
+    notes?: string | null
+  }>) => api.post('/transactions', { _action: 'split', parentId, children }),
+  /** Unsplit: remove all children and restore parent to completed */
+  unsplit: (parentId: string) =>
+    api.post('/transactions', { _action: 'unsplit', parentId }),
 }
 
 // -- Recurrences --

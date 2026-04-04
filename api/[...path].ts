@@ -871,6 +871,76 @@ async function handleTransactions(
   // POST transfer — create a linked transfer pair
   // Detect via query ?action=transfer OR body _action:'transfer'
   const bodyAction = (req.body as Record<string, unknown>)?._action
+
+  // ── SPLIT ──────────────────────────────────────────────────────
+  if (method === 'POST' && bodyAction === 'split') {
+    const b = req.body as Record<string, unknown>
+    const parentId = b.parentId as string
+    const children = b.children as Array<{
+      description?: string
+      amount: string
+      tagIds?: string[]
+      beneficiarySubjectId?: string | null
+      notes?: string | null
+    }>
+
+    if (!parentId || !children?.length) return badRequest(res, 'parentId e children sono obbligatori')
+
+    const { data: parent, error: parentErr } = await sb
+      .from('transactions').select('*').eq('id', parentId).single()
+    if (parentErr || !parent) return notFound(res, 'Transazione non trovata')
+
+    const p = parent as Record<string, unknown>
+    const parentAmt = Math.abs(parseFloat(p.amount as string))
+    const childrenSum = children.reduce((s, c) => s + Math.abs(parseFloat(c.amount)), 0)
+    if (Math.abs(parentAmt - childrenSum) > 0.01) {
+      return badRequest(res, `La somma delle imputazioni (${childrenSum.toFixed(2)}) non corrisponde all'importo (${parentAmt.toFixed(2)})`)
+    }
+
+    await sb.from('transactions')
+      .update({ status: 'split', updated_at: new Date().toISOString() })
+      .eq('id', parentId)
+
+    const isOut = parseFloat(p.amount as string) < 0
+    const createdChildren = []
+    for (const child of children) {
+      const childAmt = isOut ? -Math.abs(parseFloat(child.amount)) : Math.abs(parseFloat(child.amount))
+      const { data: created, error: childErr } = await sb.from('transactions').insert({
+        date: p.date,
+        description: child.description || p.description,
+        amount: childAmt.toFixed(4),
+        currency: p.currency,
+        container_id: p.container_id,
+        type: p.type,
+        status: 'completed',
+        source: 'manual',
+        split_parent_id: parentId,
+        beneficiary_subject_id: child.beneficiarySubjectId ?? null,
+        notes: child.notes ?? null,
+      }).select().single()
+      if (childErr || !created) continue
+      createdChildren.push(created)
+      if (child.tagIds?.length) {
+        await sb.from('transaction_tags').insert(
+          child.tagIds.map((tagId: string) => ({ transaction_id: (created as Record<string,unknown>).id, tag_id: tagId }))
+        )
+      }
+    }
+    return ok(res, { parent: { ...p, status: 'split' }, children: createdChildren })
+  }
+
+  // ── UNSPLIT ────────────────────────────────────────────────────
+  if (method === 'POST' && bodyAction === 'unsplit') {
+    const b = req.body as Record<string, unknown>
+    const parentId = b.parentId as string
+    if (!parentId) return badRequest(res, 'parentId e obbligatorio')
+    await sb.from('transactions').delete().eq('split_parent_id', parentId)
+    await sb.from('transactions')
+      .update({ status: 'completed', updated_at: new Date().toISOString() })
+      .eq('id', parentId)
+    return ok(res, { unsplit: true })
+  }
+
   if (method === 'POST' && (actionParam === 'transfer' || bodyAction === 'transfer')) {
     const b = req.body || {}
     if (!b.date || !b.amount || !b.fromContainerId || !b.toContainerId) {
@@ -1955,6 +2025,7 @@ async function handleStats(
       .from('transactions')
       .select('id, amount, date')
       .neq('status', 'cancelled')
+      .neq('status', 'split')
       .neq('type', 'transfer_in')
       .neq('type', 'transfer_out')
     if (dateFrom) txQuery = txQuery.gte('date', dateFrom)
@@ -2081,6 +2152,7 @@ async function handleStats(
       .select('date, amount, type')
       .gte('date', startStr)
       .neq('status', 'cancelled')
+      .neq('status', 'split')
     if (endStr) query = query.lte('date', endStr)
     if (containerId) query = query.eq('container_id', containerId)
 
@@ -2159,6 +2231,7 @@ async function handleStats(
         .select('amount')
         .in('container_id', activeIds)
         .neq('status', 'cancelled')
+        .neq('status', 'split')
       for (const tx of balanceTxs || []) {
         totalBalance += parseFloat(tx.amount as string) || 0
       }
@@ -2192,6 +2265,7 @@ async function handleStats(
         .select('container_id, amount')
         .in('container_id', activeIds)
         .neq('status', 'cancelled')
+        .neq('status', 'split')
     : { data: [] }
 
   const txSumMap = new Map<string, number>()
@@ -2227,6 +2301,7 @@ async function handleStats(
     .gte('date', monthStart)
     .lt('date', nextMonth)
     .neq('status', 'cancelled')
+    .neq('status', 'split')
 
   let monthlyIncome = 0
   let monthlyExpenses = 0

@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect, useRef } from 'react'
+import React, { useMemo, useState, useCallback, useEffect, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   useReactTable,
@@ -24,6 +24,7 @@ import {
   Trash2,
   Loader2,
   AlertCircle,
+  Scissors,
 } from 'lucide-react'
 import { SearchableSelect, SearchableMultiSelect } from '@/components/ui/SearchableSelect'
 import type { Transaction, TransactionType, TransactionStatus, Container, Counterparty, Subject, Tag } from '@/types'
@@ -181,6 +182,15 @@ function TransactionModal({
   })
 
   const isTransfer = form.type === 'transfer'
+
+  useEffect(() => {
+    if (!existing && form.containerId && !form.beneficiarySubjectId) {
+      const container = containers.find(c => c.id === form.containerId)
+      if (container?.subjectId) {
+        setForm(f => ({ ...f, beneficiarySubjectId: container.subjectId }))
+      }
+    }
+  }, [form.containerId])
 
   function handleSave() {
     if (!form.amount) return
@@ -366,7 +376,7 @@ function TransactionModal({
               <SearchableSelect
                 value={form.beneficiarySubjectId}
                 onChange={(v) => setForm({ ...form, beneficiarySubjectId: v })}
-                options={subjects.filter((s) => s.role === 'partner').map((s) => ({ value: s.id, label: s.name }))}
+                options={subjects.filter((s) => s.isActive).map((s) => ({ value: s.id, label: s.name }))}
                 placeholder="Soggetto..."
                 allowEmpty
                 emptyLabel="— Nessuno —"
@@ -422,12 +432,217 @@ function TransactionModal({
   )
 }
 
+// ── Split Modal ─────────────────────────────────────────────
+
+function SplitModal({
+  transaction,
+  onClose,
+  subjects,
+  tags,
+}: {
+  transaction: Transaction
+  onClose: () => void
+  subjects: Subject[]
+  tags: Tag[]
+}) {
+  const queryClient = useQueryClient()
+  const totalAmount = Math.abs(parseFloat(transaction.amount))
+
+  const [rows, setRows] = useState([{
+    id: crypto.randomUUID(),
+    description: transaction.description ?? '',
+    amount: String(totalAmount),
+    tagIds: (transaction.tags || []).map(t => t.id),
+    beneficiarySubjectId: transaction.beneficiarySubjectId ?? '',
+    notes: '',
+  }])
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const rowsSum = rows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0)
+  const remaining = Math.round((totalAmount - rowsSum) * 100) / 100
+  const isBalanced = Math.abs(remaining) < 0.01
+  const progressPct = Math.min(100, (rowsSum / totalAmount) * 100)
+  const overBudget = rowsSum > totalAmount + 0.01
+
+  function addRow() {
+    setRows(prev => [...prev, {
+      id: crypto.randomUUID(),
+      description: transaction.description ?? '',
+      amount: remaining > 0 ? remaining.toFixed(2) : '',
+      tagIds: [],
+      beneficiarySubjectId: '',
+      notes: '',
+    }])
+  }
+
+  function removeRow(id: string) {
+    if (rows.length <= 1) return
+    setRows(prev => prev.filter(r => r.id !== id))
+  }
+
+  function updateRow(id: string, field: string, value: unknown) {
+    setRows(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r))
+  }
+
+  async function handleSave() {
+    if (!isBalanced) {
+      setError(remaining > 0
+        ? `Mancano ancora ${remaining.toFixed(2)} EUR da imputare`
+        : `Hai superato l'importo di ${Math.abs(remaining).toFixed(2)} EUR`)
+      return
+    }
+    setSaving(true)
+    setError(null)
+    try {
+      await transactionsApi.split(transaction.id, rows.map(r => ({
+        description: r.description || undefined,
+        amount: r.amount,
+        tagIds: r.tagIds.length ? r.tagIds : undefined,
+        beneficiarySubjectId: r.beneficiarySubjectId || null,
+        notes: r.notes || null,
+      })))
+      queryClient.invalidateQueries({ queryKey: ['transactions'] })
+      queryClient.invalidateQueries({ queryKey: ['stats'] })
+      onClose()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Errore nel salvataggio')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const inputCls = 'w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500'
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-start justify-between border-b border-zinc-800 px-6 py-4">
+          <div>
+            <h2 className="text-lg font-semibold text-zinc-100">Splitta transazione</h2>
+            <p className="text-sm text-zinc-400 mt-0.5">
+              {transaction.description} · <span className="font-mono">{Math.abs(parseFloat(transaction.amount)).toFixed(2)} {transaction.currency}</span>
+            </p>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Progress bar */}
+        <div className="px-6 pt-4 pb-2">
+          <div className="flex items-center justify-between text-xs text-zinc-400 mb-1.5">
+            <span>Imputato: <span className="font-mono text-zinc-200">{rowsSum.toFixed(2)}</span></span>
+            <span className={remaining > 0.01 ? 'text-amber-400' : overBudget ? 'text-red-400' : 'text-energy-400'}>
+              {remaining > 0.01 ? `Rimangono ${remaining.toFixed(2)} EUR` : overBudget ? `Eccesso ${Math.abs(remaining).toFixed(2)} EUR` : 'Tutto imputato'}
+            </span>
+          </div>
+          <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all ${overBudget ? 'bg-red-500' : isBalanced ? 'bg-energy-500' : 'bg-amber-500'}`}
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Rows */}
+        <div className="px-6 py-4 space-y-3">
+          {rows.map((row, idx) => (
+            <div key={row.id} className="rounded-xl border border-zinc-800 bg-zinc-800/40 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-zinc-400">Imputazione {idx + 1}</span>
+                {rows.length > 1 && (
+                  <button onClick={() => removeRow(row.id)} className="rounded-md p-1 text-zinc-500 hover:text-red-400">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Descrizione</label>
+                  <input
+                    type="text"
+                    value={row.description}
+                    onChange={e => updateRow(row.id, 'description', e.target.value)}
+                    className={inputCls}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Importo *</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={row.amount}
+                    onChange={e => updateRow(row.id, 'amount', e.target.value)}
+                    className={inputCls}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Tag</label>
+                  <SearchableMultiSelect
+                    value={row.tagIds}
+                    onChange={ids => updateRow(row.id, 'tagIds', ids)}
+                    options={tags.filter(t => t.isActive).map(t => ({ value: t.id, label: t.name, color: t.color }))}
+                    placeholder="Tag..."
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Beneficiario</label>
+                  <SearchableSelect
+                    value={row.beneficiarySubjectId}
+                    onChange={v => updateRow(row.id, 'beneficiarySubjectId', v)}
+                    options={subjects.filter(s => s.isActive).map(s => ({ value: s.id, label: s.name }))}
+                    placeholder="Per chi..."
+                    allowEmpty
+                    emptyLabel="Nessuno"
+                  />
+                </div>
+              </div>
+            </div>
+          ))}
+
+          <button
+            onClick={addRow}
+            className="w-full rounded-xl border border-dashed border-zinc-700 py-2.5 text-sm text-zinc-400 hover:border-energy-500/50 hover:text-energy-400 transition-colors"
+          >
+            + Aggiungi imputazione
+          </button>
+        </div>
+
+        {/* Footer */}
+        <div className="border-t border-zinc-800 px-6 py-4 space-y-3">
+          {error && (
+            <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>
+          )}
+          <div className="flex justify-end gap-3">
+            <button onClick={onClose} className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:border-zinc-600">
+              Annulla
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={!isBalanced || saving}
+              className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              Splitta
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Component ───────────────────────────────────────────────
 
 export function Transactions() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [showCreate, setShowCreate] = useState(false)
   const [editingTx, setEditingTx] = useState<Transaction | null>(null)
+  const [splittingTx, setSplittingTx] = useState<Transaction | null>(null)
 
   // Filter state — initialized from URL search params if present
   const [searchText, setSearchText] = useState(searchParams.get('search') || '')
@@ -438,6 +653,7 @@ export function Transactions() {
   const [typeFilter, setTypeFilter] = useState(searchParams.get('type') || '')
   const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || '')
   const [tagFilter, setTagFilter] = useState(searchParams.get('tagId') || '')
+  const [beneficiaryFilter, setBeneficiaryFilter] = useState('')
 
   // Table state
   const [sorting, setSorting] = useState<SortingState>([
@@ -448,15 +664,15 @@ export function Transactions() {
   // Debounce ALL filter values (300ms) so that date pickers, search input,
   // and dropdowns never trigger an API call while the user is still interacting.
   const [debouncedFilters, setDebouncedFilters] = useState({
-    searchText, dateFrom, dateTo, containerId, counterpartyId, typeFilter, statusFilter, tagFilter,
+    searchText, dateFrom, dateTo, containerId, counterpartyId, typeFilter, statusFilter, tagFilter, beneficiaryFilter,
   })
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => {
     debounceRef.current = setTimeout(() => {
-      setDebouncedFilters({ searchText, dateFrom, dateTo, containerId, counterpartyId, typeFilter, statusFilter, tagFilter })
+      setDebouncedFilters({ searchText, dateFrom, dateTo, containerId, counterpartyId, typeFilter, statusFilter, tagFilter, beneficiaryFilter })
     }, 300)
     return () => clearTimeout(debounceRef.current)
-  }, [searchText, dateFrom, dateTo, containerId, counterpartyId, typeFilter, statusFilter, tagFilter])
+  }, [searchText, dateFrom, dateTo, containerId, counterpartyId, typeFilter, statusFilter, tagFilter, beneficiaryFilter])
 
   // Clear URL search params after initial load so they don't persist on navigation
   useEffect(() => {
@@ -480,6 +696,7 @@ export function Transactions() {
     if (debouncedFilters.typeFilter) params.type = debouncedFilters.typeFilter
     if (debouncedFilters.statusFilter) params.status = debouncedFilters.statusFilter
     if (debouncedFilters.tagFilter) params.tagId = debouncedFilters.tagFilter
+    if (debouncedFilters.beneficiaryFilter) params.beneficiarySubjectId = debouncedFilters.beneficiaryFilter
     return params
   }, [debouncedFilters])
 
@@ -505,7 +722,7 @@ export function Transactions() {
   }, [createCounterpartyMutation])
 
   const handleCreateSubject = useCallback((name: string) => {
-    createSubjectMutation.mutate({ name, role: 'partner' as const, isActive: true })
+    createSubjectMutation.mutate({ name, type: 'person' as const, isActive: true })
   }, [createSubjectMutation])
 
   const handleCreateTag = useCallback((name: string) => {
@@ -643,7 +860,8 @@ export function Transactions() {
     counterpartyId !== '' ||
     typeFilter !== '' ||
     statusFilter !== '' ||
-    tagFilter !== ''
+    tagFilter !== '' ||
+    beneficiaryFilter !== ''
 
   function clearFilters() {
     setSearchText('')
@@ -654,6 +872,7 @@ export function Transactions() {
     setTypeFilter('')
     setStatusFilter('')
     setTagFilter('')
+    setBeneficiaryFilter('')
   }
 
   // ── Column definitions ────────────────────────────────────
@@ -781,24 +1000,55 @@ export function Transactions() {
         id: 'actions',
         header: '',
         enableSorting: false,
-        cell: ({ row }) => (
-          <div className="flex items-center gap-1">
-            <button
-              onClick={(e) => { e.stopPropagation(); setEditingTx(row.original) }}
-              className="rounded p-1.5 text-zinc-500 hover:text-energy-400 hover:bg-zinc-800 transition-colors"
-              title="Modifica"
-            >
-              <Pencil className="h-3.5 w-3.5" />
-            </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); handleDeleteTx(row.original.id) }}
-              className="rounded p-1.5 text-zinc-500 hover:text-red-400 hover:bg-zinc-800 transition-colors"
-              title="Elimina"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        ),
+        cell: ({ row }) => {
+          const tx = row.original
+          if (tx.status === 'split') {
+            return (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation()
+                    if (!confirm('Annullare lo split? Tutte le imputazioni saranno eliminate.')) return
+                    await transactionsApi.unsplit(tx.id)
+                    queryClient.invalidateQueries({ queryKey: ['transactions'] })
+                    queryClient.invalidateQueries({ queryKey: ['stats'] })
+                  }}
+                  className="rounded-md px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-amber-400 transition-colors"
+                  title="Annulla split"
+                >
+                  Annulla split
+                </button>
+              </div>
+            )
+          }
+          return (
+            <div className="flex items-center gap-1">
+              {!tx.splitParentId && tx.type !== 'transfer_out' && tx.type !== 'transfer_in' && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setSplittingTx(tx) }}
+                  className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-energy-400 transition-colors"
+                  title="Splitta"
+                >
+                  <Scissors className="h-3.5 w-3.5" />
+                </button>
+              )}
+              <button
+                onClick={(e) => { e.stopPropagation(); setEditingTx(tx) }}
+                className="rounded p-1.5 text-zinc-500 hover:text-energy-400 hover:bg-zinc-800 transition-colors"
+                title="Modifica"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); handleDeleteTx(tx.id) }}
+                className="rounded p-1.5 text-zinc-500 hover:text-red-400 hover:bg-zinc-800 transition-colors"
+                title="Elimina"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )
+        },
       },
     ],
     [containerName, containerColor, counterpartyName],
@@ -972,6 +1222,17 @@ export function Transactions() {
             className="min-w-[130px]"
           />
 
+          {/* Beneficiary dropdown */}
+          <SearchableSelect
+            value={beneficiaryFilter}
+            onChange={setBeneficiaryFilter}
+            options={subjects.filter(s => s.isActive).map(s => ({ value: s.id, label: s.name }))}
+            placeholder="Beneficiario"
+            allowEmpty
+            emptyLabel="Tutti"
+            className="min-w-[140px]"
+          />
+
           {/* Clear filters */}
           {hasFilters && (
             <button
@@ -1082,22 +1343,58 @@ export function Transactions() {
                   </td>
                 </tr>
               ) : (
-                table.getRowModel().rows.map((row) => (
-                  <tr
-                    key={row.id}
-                    className="hover:bg-zinc-800/30 transition-colors cursor-pointer"
-                    onClick={() => setEditingTx(row.original)}
-                  >
-                    {row.getVisibleCells().map((cell) => (
-                      <td key={cell.id} className="px-4 py-3 text-zinc-300">
-                        {flexRender(
-                          cell.column.columnDef.cell,
-                          cell.getContext(),
-                        )}
-                      </td>
-                    ))}
-                  </tr>
-                ))
+                table.getRowModel().rows.map((row) => {
+                  const tx = row.original
+                  return (
+                    <React.Fragment key={row.id}>
+                      <tr
+                        className="hover:bg-zinc-800/30 transition-colors cursor-pointer"
+                        onClick={() => setEditingTx(tx)}
+                      >
+                        {row.getVisibleCells().map((cell) => (
+                          <td key={cell.id} className="px-4 py-3 text-zinc-300">
+                            {flexRender(
+                              cell.column.columnDef.cell,
+                              cell.getContext(),
+                            )}
+                          </td>
+                        ))}
+                      </tr>
+                      {tx.status === 'split' && tx.splitChildren && tx.splitChildren.length > 0 && (
+                        tx.splitChildren.map((child: Transaction) => (
+                          <tr key={child.id} className="border-b border-zinc-800/30 bg-zinc-900/30">
+                            <td className="px-4 py-2">
+                              <div className="flex items-center gap-2 pl-6 border-l-2 border-energy-500/30">
+                                <span className="text-xs text-zinc-500">{child.date}</span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-2">
+                              <span className="text-sm text-zinc-400 pl-6">{child.description}</span>
+                            </td>
+                            <td className="px-4 py-2" />
+                            <td className="px-4 py-2" />
+                            <td className="px-4 py-2" />
+                            <td className="px-4 py-2">
+                              {child.tags?.map((t: Tag) => (
+                                <span key={t.id} className="inline-block rounded-md px-1.5 py-0.5 text-xs mr-1"
+                                  style={{ backgroundColor: t.color ? `${t.color}20` : undefined, color: t.color ?? '#a1a1aa' }}>
+                                  {t.name}
+                                </span>
+                              ))}
+                            </td>
+                            <td className="px-4 py-2" />
+                            <td className="px-4 py-2 text-right">
+                              <span className={`font-mono text-sm ${parseFloat(child.amount) >= 0 ? 'text-energy-400' : 'text-red-400'}`}>
+                                {parseFloat(child.amount) >= 0 ? '+' : ''}{parseFloat(child.amount).toFixed(2)}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2" />
+                          </tr>
+                        ))
+                      )}
+                    </React.Fragment>
+                  )
+                })
               )}
             </tbody>
           </table>
@@ -1189,6 +1486,16 @@ export function Transactions() {
           onCreateCounterparty={handleCreateCounterparty}
           onCreateSubject={handleCreateSubject}
           onCreateTag={handleCreateTag}
+        />
+      )}
+
+      {/* ── Split Modal ──────────────────────────────────── */}
+      {splittingTx && (
+        <SplitModal
+          transaction={splittingTx}
+          onClose={() => setSplittingTx(null)}
+          subjects={subjects}
+          tags={tags}
         />
       )}
     </div>
