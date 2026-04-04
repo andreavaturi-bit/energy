@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Plus,
@@ -17,7 +17,9 @@ import {
   FolderOpen,
   Layers,
 } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useTags, useCreateTag, useUpdateTag, useDeleteTag } from '@/lib/hooks'
+import { tagsApi } from '@/lib/api'
 import { SearchableSelect } from '@/components/ui/SearchableSelect'
 import type { Tag, TagType } from '@/types'
 
@@ -113,8 +115,44 @@ function flattenTree(nodes: TagNode[], expanded: Set<string>): TagNode[] {
 
 // ── Main component ──────────────────────────────────────────
 
+// Mapping: category/purpose name -> scope name for one-time migration
+const parentMapping: Record<string, string> = {
+  // Personale
+  'Affitto': 'Personale', 'Box': 'Personale', 'Bollette': 'Personale',
+  'Acqua': 'Personale', 'Spesa alimentare': 'Personale', 'Automobile': 'Personale',
+  'Telepass': 'Personale', 'Assicurazioni': 'Personale', 'Carta di credito': 'Personale',
+  'Palestra': 'Personale', 'Capelli': 'Personale', 'Beneficenza': 'Personale',
+  'Whoop': 'Personale', 'Commercialista personale': 'Personale',
+  'TARI': 'Personale', 'F24 - IVA': 'Personale', 'F24 - IRPEF': 'Personale',
+  'F24 - Cedolini': 'Personale', 'Multe': 'Personale',
+  'Netflix': 'Personale', 'Disney+': 'Personale', 'Amazon Prime': 'Personale',
+  'YouTube': 'Personale', 'Spotify': 'Personale', 'Notion': 'Personale',
+  'ChatGPT': 'Personale', 'Claude': 'Personale', 'Google Premium': 'Personale',
+  'VPN/VPS': 'Personale', 'Domini': 'Personale', 'Software e abbonamenti': 'Personale',
+  // Familiare
+  'Scuola': 'Familiare', 'Milano Ristorazione': 'Familiare', 'Baby Sitter': 'Familiare',
+  'Pulizie casa': 'Familiare', 'Assicurazioni familiari': 'Familiare',
+  'Vacanze e viaggi': 'Familiare', 'Regali': 'Familiare',
+  "Comunita' ebraica": 'Familiare', "Attivita' familiari e sportive": 'Familiare',
+  'Per conto parenti': 'Familiare', 'Accantonamento figli': 'Familiare',
+  // Aziendale Kairos
+  'Commercialista aziendale': 'Aziendale Kairos', 'Assicurazioni professionali': 'Aziendale Kairos',
+  'Collaboratori': 'Aziendale Kairos', 'Ufficio': 'Aziendale Kairos',
+  'PEC': 'Aziendale Kairos', 'Fatturazione elettronica': 'Aziendale Kairos',
+  'Versamento c/capitale': 'Aziendale Kairos', 'Scaricabile IVA': 'Aziendale Kairos',
+  // VS / Opzionetika
+  'TradingView': 'VS / Opzionetika', 'Corsi VS / Opzionetika': 'VS / Opzionetika',
+  'Earnings (trading)': 'VS / Opzionetika', 'Da dividere con Mirko': 'VS / Opzionetika',
+  // Ghiaccio Spettacolo
+  'Coreografia': 'Ghiaccio Spettacolo', 'Insegnamento': 'Ghiaccio Spettacolo',
+  'Formazione / Speaker': 'Ghiaccio Spettacolo',
+  // Ace of Diamonds
+  'Consulenza': 'Ace of Diamonds',
+}
+
 export function Tags() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const { data: tags = [], isLoading, isError, error } = useTags()
   const createTag = useCreateTag()
   const updateTag = useUpdateTag()
@@ -130,6 +168,30 @@ export function Tags() {
   const [selectedScope, setSelectedScope] = useState<TagNode | null>(null)
   const [selectedCategory, setSelectedCategory] = useState<TagNode | null>(null)
   const [mobileStep, setMobileStep] = useState(0)
+
+  // One-time migration: assign parentId to orphan categories/purposes
+  const migrationRan = useRef(false)
+  useEffect(() => {
+    if (migrationRan.current || tags.length === 0) return
+    const scopes = tags.filter((t) => t.type === 'scope')
+    const orphans = tags.filter(
+      (t) => t.type !== 'scope' && !t.parentId && parentMapping[t.name],
+    )
+    if (orphans.length === 0) return
+    migrationRan.current = true
+
+    const scopeByName = new Map(scopes.map((s) => [s.name, s.id]))
+
+    Promise.all(
+      orphans.map((tag) => {
+        const scopeId = scopeByName.get(parentMapping[tag.name])
+        if (!scopeId) return Promise.resolve()
+        return tagsApi.update(tag.id, { parentId: scopeId })
+      }),
+    ).then(() => {
+      queryClient.invalidateQueries({ queryKey: ['tags'] })
+    })
+  }, [tags, queryClient])
 
   // Build full tree (unfiltered for columns)
   const fullTree = useMemo(() => {
