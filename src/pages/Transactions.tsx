@@ -25,6 +25,7 @@ import {
   Loader2,
   AlertCircle,
   Scissors,
+  SlidersHorizontal,
 } from 'lucide-react'
 import { SearchableSelect, SearchableMultiSelect } from '@/components/ui/SearchableSelect'
 import type { Transaction, TransactionType, TransactionStatus, Container, Counterparty, Subject, Tag } from '@/types'
@@ -654,6 +655,12 @@ export function Transactions() {
   const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || '')
   const [tagFilter, setTagFilter] = useState(searchParams.get('tagId') || '')
   const [beneficiaryFilter, setBeneficiaryFilter] = useState('')
+  const [filtersOpen, setFiltersOpen] = useState(false)
+
+  const activeFilterCount = [
+    dateFrom, dateTo, containerId, counterpartyId,
+    typeFilter, statusFilter, tagFilter, beneficiaryFilter,
+  ].filter(Boolean).length
 
   // Table state
   const [sorting, setSorting] = useState<SortingState>([
@@ -1131,10 +1138,12 @@ export function Transactions() {
       </div>
 
       {/* ── Filter bar ───────────────────────────────────── */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-        <div className="flex flex-wrap items-center gap-3">
-          {/* Search */}
-          <div className="relative flex-1 min-w-[200px]">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">
+
+        {/* Prima riga: sempre visibile - search + toggle filtri (mobile) */}
+        <div className="flex items-center gap-3">
+          {/* Search - sempre visibile */}
+          <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
             <input
               type="text"
@@ -1145,6 +1154,22 @@ export function Transactions() {
             />
           </div>
 
+          {/* Bottone filtri - solo su mobile */}
+          <button
+            className="lg:hidden flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-600 transition-colors shrink-0"
+            onClick={() => setFiltersOpen(!filtersOpen)}
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+            {activeFilterCount > 0 && (
+              <span className="rounded-full bg-energy-500 text-zinc-950 text-xs font-medium px-1.5 py-0.5 min-w-[18px] text-center leading-none">
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* Seconda riga: filtri - sempre visibili su desktop, toggle su mobile */}
+        <div className={`flex-wrap items-center gap-3 ${filtersOpen ? 'flex' : 'hidden'} lg:flex`}>
           {/* Date from */}
           <div className="flex items-center gap-1.5">
             <label className="text-xs text-zinc-500">Da</label>
@@ -1233,14 +1258,18 @@ export function Transactions() {
             className="min-w-[140px]"
           />
 
-          {/* Clear filters */}
-          {hasFilters && (
+          {/* Reset filtri */}
+          {activeFilterCount > 0 && (
             <button
-              onClick={clearFilters}
-              className="flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-colors"
+              onClick={() => {
+                setDateFrom(''); setDateTo(''); setContainerId('')
+                setCounterpartyId(''); setTypeFilter(''); setStatusFilter('')
+                setTagFilter(''); setBeneficiaryFilter('')
+              }}
+              className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-400 hover:text-red-400 hover:border-red-500/30 transition-colors"
             >
               <X className="h-3.5 w-3.5" />
-              Cancella filtri
+              Reset
             </button>
           )}
         </div>
