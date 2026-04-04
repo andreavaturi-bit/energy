@@ -57,6 +57,7 @@ const statusStyles: Record<TransactionStatus, string> = {
   pending: 'bg-amber-500/10 text-amber-400',
   projected: 'bg-blue-500/10 text-blue-400',
   cancelled: 'bg-zinc-500/10 text-zinc-400',
+  split: 'bg-purple-500/10 text-purple-400',
 }
 
 const statusLabels: Record<TransactionStatus, string> = {
@@ -64,6 +65,7 @@ const statusLabels: Record<TransactionStatus, string> = {
   pending: 'In sospeso',
   projected: 'Proiettata',
   cancelled: 'Annullata',
+  split: 'Suddivisa',
 }
 
 // ── Type badge background mapping ───────────────────────────
@@ -174,8 +176,7 @@ function TransactionModal({
     type: isExistingTransfer ? 'transfer' : (existing?.type ?? 'expense'),
     status: (existing?.status ?? 'completed') as TransactionStatus,
     notes: existing?.notes ?? '',
-    sharedWithSubjectId: existing?.sharedWithSubjectId ?? '',
-    sharePercentage: existing?.sharePercentage ?? '',
+    beneficiarySubjectId: existing?.beneficiarySubjectId ?? '',
     tagIds: (existing?.tags || []).map(t => t.id),
   })
 
@@ -219,8 +220,7 @@ function TransactionModal({
         status: form.status,
         source: existing?.source ?? 'manual',
         notes: form.notes || null,
-        sharedWithSubjectId: form.sharedWithSubjectId || null,
-        sharePercentage: form.sharePercentage || null,
+        beneficiarySubjectId: form.beneficiarySubjectId || null,
         tagIds: form.tagIds,
       })
     }
@@ -365,8 +365,8 @@ function TransactionModal({
               <div>
                 <label className={labelCls}>Condiviso con</label>
                 <SearchableSelect
-                  value={form.sharedWithSubjectId}
-                  onChange={(v) => setForm({ ...form, sharedWithSubjectId: v })}
+                  value={form.beneficiarySubjectId}
+                  onChange={(v) => setForm({ ...form, beneficiarySubjectId: v })}
                   options={subjects.filter((s) => s.role === 'partner').map((s) => ({ value: s.id, label: s.name }))}
                   placeholder="Soggetto..."
                   allowEmpty
@@ -375,12 +375,6 @@ function TransactionModal({
                   createLabel="Crea soggetto"
                 />
               </div>
-              {form.sharedWithSubjectId && (
-                <div>
-                  <label className={labelCls}>Quota %</label>
-                  <input type="number" min="1" max="100" value={form.sharePercentage} onChange={(e) => setForm({ ...form, sharePercentage: e.target.value })} placeholder="50" className={inputCls} />
-                </div>
-              )}
             </div>
           )}
 
