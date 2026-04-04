@@ -187,9 +187,8 @@ export const transactions = pgTable('transactions', {
   // SPLIT - Transazione padre/figlio
   splitParentId: uuid('split_parent_id'),
 
-  // COST SHARING (divisione con socio)
-  sharedWithSubjectId: uuid('shared_with_subject_id').references(() => subjects.id),
-  sharePercentage: decimal('share_percentage', { precision: 5, scale: 2 }),
+  // BENEFICIARIO (per chi e' la spesa)
+  beneficiarySubjectId: uuid('beneficiary_subject_id').references(() => subjects.id),
 
   // RATEIZZAZIONE
   installmentPlanId: uuid('installment_plan_id'),
@@ -212,6 +211,7 @@ export const transactions = pgTable('transactions', {
   index('idx_transactions_transfer_linked').on(table.transferLinkedId),
   index('idx_transactions_recurrence').on(table.recurrenceId),
   index('idx_transactions_import_batch').on(table.importBatchId),
+  index('idx_transactions_beneficiary').on(table.beneficiarySubjectId),
   index('idx_transactions_date_container').on(table.date, table.containerId),
   index('idx_transactions_external').on(table.externalId, table.containerId),
 ])
@@ -252,10 +252,6 @@ export const recurrences = pgTable('recurrences', {
   containerId: uuid('container_id').references(() => containers.id),
   counterpartyId: uuid('counterparty_id').references(() => counterparties.id),
   type: text('type').notNull(),  // income, expense, etc.
-
-  // Cost sharing template
-  sharedWithSubjectId: uuid('shared_with_subject_id').references(() => subjects.id),
-  sharePercentage: decimal('share_percentage', { precision: 5, scale: 2 }),
 
   // Periodo di validita'
   startDate: date('start_date').notNull(),

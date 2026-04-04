@@ -32,7 +32,7 @@ export type TransactionType =
   | 'repayment_out'
   | 'repayment_in'
 
-export type TransactionStatus = 'completed' | 'pending' | 'projected' | 'cancelled'
+export type TransactionStatus = 'completed' | 'pending' | 'projected' | 'cancelled' | 'split'
 export type TransactionSource = 'manual' | 'csv_import' | 'pdf_import' | 'recurring_generated'
 
 export type TagType = 'category' | 'scope' | 'purpose' | 'custom'
@@ -136,8 +136,8 @@ export interface Transaction {
   importBatchId?: string | null
   recurrenceId?: string | null
   splitParentId?: string | null
-  sharedWithSubjectId?: string | null
-  sharePercentage?: string | null
+  beneficiarySubjectId?: string | null
+  beneficiaryName?: string | null  // da join API
   installmentPlanId?: string | null
   installmentNumber?: number | null
   externalId?: string | null
@@ -149,7 +149,6 @@ export interface Transaction {
   tags?: Tag[]
   splitChildren?: Transaction[]
   transferLinked?: Transaction
-  sharedWithSubject?: Subject
 }
 
 export interface Recurrence {
@@ -166,8 +165,6 @@ export interface Recurrence {
   containerId?: string | null
   counterpartyId?: string | null
   type: string
-  sharedWithSubjectId?: string | null
-  sharePercentage?: string | null
   startDate: string
   endDate?: string | null
   reminderDaysBefore?: number | null
@@ -312,7 +309,6 @@ export interface TransactionFilters {
   maxAmount?: number
   currency?: string
   source?: TransactionSource
-  hasSharing?: boolean
 }
 
 export interface DashboardSummary {

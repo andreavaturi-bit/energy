@@ -495,12 +495,13 @@ async function handleTransactions(
     let query = sb
       .from('transactions')
       .select(
-        '*, containers(name, color, currency), counterparties(name), subjects!transactions_shared_with_subject_id_subjects_id_fk(name)',
+        '*, containers(name, color, currency), counterparties(name), beneficiarySubject:subjects!transactions_beneficiary_subject_id_subjects_id_fk(name)',
         { count: 'exact' },
       )
 
     if (param('containerId')) query = query.eq('container_id', param('containerId')!)
     if (param('counterpartyId')) query = query.eq('counterparty_id', param('counterpartyId')!)
+    if (param('beneficiarySubjectId')) query = query.eq('beneficiary_subject_id', param('beneficiarySubjectId')!)
     if (param('type')) query = query.eq('type', param('type')!)
     if (param('status')) query = query.eq('status', param('status')!)
     if (param('dateFrom')) query = query.gte('date', param('dateFrom')!)
@@ -553,18 +554,51 @@ async function handleTransactions(
       const row = { ...r } as Record<string, unknown>
       const containers = row.containers as { name?: string; color?: string; currency?: string } | null
       const counterparties = row.counterparties as { name?: string } | null
-      const subjects = row.subjects as { name?: string } | null
+      const beneficiarySubject = row.beneficiarySubject as { name?: string } | null
       row.container_name = containers?.name ?? null
       row.container_color = containers?.color ?? null
       row.container_currency = containers?.currency ?? null
       row.counterparty_name = counterparties?.name ?? null
-      row.shared_with_name = subjects?.name ?? null
+      row.beneficiary_name = beneficiarySubject?.name ?? null
       row.tags = tagsByTxId.get(row.id as string) || []
       delete row.containers
       delete row.counterparties
-      delete row.subjects
+      delete row.beneficiarySubject
       return row
     })
+
+    // Load split children for parent-split transactions
+    const splitParentIds = rows
+      .filter((r: Record<string, unknown>) => r.status === 'split')
+      .map((r: Record<string, unknown>) => r.id as string)
+
+    if (splitParentIds.length > 0) {
+      const { data: childRows } = await sb
+        .from('transactions')
+        .select('*, beneficiarySubject:subjects!transactions_beneficiary_subject_id_subjects_id_fk(name), tags:transaction_tags(tags(id, name, color))')
+        .in('split_parent_id', splitParentIds)
+        .order('created_at')
+
+      const childrenByParent = new Map<string, unknown[]>()
+      for (const child of childRows || []) {
+        const c = child as Record<string, unknown>
+        // Flatten beneficiary
+        const bs = c.beneficiarySubject as { name?: string } | null
+        c.beneficiary_name = bs?.name ?? null
+        delete c.beneficiarySubject
+        // Flatten tags
+        const rawTags = c.tags as Array<{ tags: Record<string, unknown> }> | null
+        c.tags = (rawTags || []).map(t => t.tags).filter(Boolean)
+        const pid = c.split_parent_id as string
+        if (!childrenByParent.has(pid)) childrenByParent.set(pid, [])
+        childrenByParent.get(pid)!.push(c)
+      }
+      for (const row of rows) {
+        if ((row as Record<string, unknown>).status === 'split') {
+          (row as Record<string, unknown>).split_children = childrenByParent.get((row as Record<string, unknown>).id as string) || []
+        }
+      }
+    }
 
     return ok(res, { rows, total: count ?? 0, limit, offset })
   }
@@ -573,7 +607,7 @@ async function handleTransactions(
     const { data, error } = await sb
       .from('transactions')
       .select(
-        '*, containers(name, color), counterparties(name), subjects!transactions_shared_with_subject_id_subjects_id_fk(name)',
+        '*, containers(name, color), counterparties(name), beneficiarySubject:subjects!transactions_beneficiary_subject_id_subjects_id_fk(name)',
       )
       .eq('id', id)
       .single()
@@ -590,14 +624,14 @@ async function handleTransactions(
     const row = { ...data } as Record<string, unknown>
     const containers = row.containers as { name?: string; color?: string } | null
     const counterparties = row.counterparties as { name?: string } | null
-    const subjects = row.subjects as { name?: string } | null
+    const beneficiarySubject = row.beneficiarySubject as { name?: string } | null
     row.container_name = containers?.name ?? null
     row.container_color = containers?.color ?? null
     row.counterparty_name = counterparties?.name ?? null
-    row.shared_with_name = subjects?.name ?? null
+    row.beneficiary_name = beneficiarySubject?.name ?? null
     delete row.containers
     delete row.counterparties
-    delete row.subjects
+    delete row.beneficiarySubject
 
     return ok(res, { ...row, tags })
   }
@@ -759,8 +793,7 @@ async function handleTransactions(
       transfer_linked_id: b.transferLinkedId ?? null,
       status: b.status ?? 'completed',
       source: b.source ?? 'manual',
-      shared_with_subject_id: b.sharedWithSubjectId ?? null,
-      share_percentage: b.sharePercentage ?? null,
+      beneficiary_subject_id: b.beneficiarySubjectId ?? null,
       installment_plan_id: b.installmentPlanId ?? null,
       installment_number: b.installmentNumber ?? null,
       external_id: b.externalId ?? null,
@@ -992,7 +1025,7 @@ async function handleTransactions(
     const { data, error } = await sb
       .from('transactions')
       .select(
-        '*, containers(name, color), counterparties(name), subjects!transactions_shared_with_subject_id_subjects_id_fk(name)',
+        '*, containers(name, color), counterparties(name), beneficiarySubject:subjects!transactions_beneficiary_subject_id_subjects_id_fk(name)',
       )
       .eq('id', txId)
       .single()
@@ -1007,14 +1040,14 @@ async function handleTransactions(
     const row = { ...data } as Record<string, unknown>
     const containers = row.containers as { name?: string; color?: string } | null
     const counterparties = row.counterparties as { name?: string } | null
-    const subjects = row.subjects as { name?: string } | null
+    const beneficiarySubject = row.beneficiarySubject as { name?: string } | null
     row.container_name = containers?.name ?? null
     row.container_color = containers?.color ?? null
     row.counterparty_name = counterparties?.name ?? null
-    row.shared_with_name = subjects?.name ?? null
+    row.beneficiary_name = beneficiarySubject?.name ?? null
     delete row.containers
     delete row.counterparties
-    delete row.subjects
+    delete row.beneficiarySubject
 
     return ok(res, { ...row, tags })
   }
@@ -1039,8 +1072,7 @@ async function handleTransactions(
     if (b.type !== undefined) update.type = b.type
     if (b.transferLinkedId !== undefined) update.transfer_linked_id = b.transferLinkedId
     if (b.status !== undefined) update.status = b.status
-    if (b.sharedWithSubjectId !== undefined) update.shared_with_subject_id = b.sharedWithSubjectId
-    if (b.sharePercentage !== undefined) update.share_percentage = b.sharePercentage
+    if (b.beneficiarySubjectId !== undefined) update.beneficiary_subject_id = b.beneficiarySubjectId || null
 
     const { data, error } = await sb
       .from('transactions')
@@ -1106,8 +1138,7 @@ async function handleTransactions(
         transfer_linked_id: b.transferLinkedId ?? null,
         status: b.status ?? 'completed',
         source: b.source ?? 'manual',
-        shared_with_subject_id: b.sharedWithSubjectId ?? null,
-        share_percentage: b.sharePercentage ?? null,
+        beneficiary_subject_id: b.beneficiarySubjectId ?? null,
         installment_plan_id: b.installmentPlanId ?? null,
         installment_number: b.installmentNumber ?? null,
         external_id: b.externalId ?? null,
