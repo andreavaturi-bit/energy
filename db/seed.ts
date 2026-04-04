@@ -981,84 +981,98 @@ async function seed() {
   // ============================================================
   console.log('3. Creazione tag...')
 
+  // --- SCOPE (ambito) - stable IDs per poterli referenziare come parent ---
+  const scopePersonale    = uuid()
+  const scopeFamiliare    = uuid()
+  const scopeKairos       = uuid()
+  const scopeVS           = uuid()
+  const scopeGhiaccio     = uuid()
+  const scopeAce          = uuid()
+
   const tagsData = [
     // --- SCOPE (ambito) ---
-    { id: uuid(), name: 'Personale', type: 'scope' as const, color: '#3B82F6', icon: 'user' },
-    { id: uuid(), name: 'Familiare', type: 'scope' as const, color: '#8B5CF6', icon: 'users' },
-    { id: uuid(), name: 'Aziendale Kairos', type: 'scope' as const, color: '#F59E0B', icon: 'building' },
-    { id: uuid(), name: 'VS / Opzionetika', type: 'scope' as const, color: '#EF4444', icon: 'target' },
-    { id: uuid(), name: 'Ghiaccio Spettacolo', type: 'scope' as const, color: '#06B6D4', icon: 'snowflake' },
-    { id: uuid(), name: 'Ace of Diamonds', type: 'scope' as const, color: '#DC2626', icon: 'diamond' },
+    { id: scopePersonale, name: 'Personale', type: 'scope' as const, color: '#3B82F6', icon: 'user' },
+    { id: scopeFamiliare, name: 'Familiare', type: 'scope' as const, color: '#8B5CF6', icon: 'users' },
+    { id: scopeKairos, name: 'Aziendale Kairos', type: 'scope' as const, color: '#F59E0B', icon: 'building' },
+    { id: scopeVS, name: 'VS / Opzionetika', type: 'scope' as const, color: '#EF4444', icon: 'target' },
+    { id: scopeGhiaccio, name: 'Ghiaccio Spettacolo', type: 'scope' as const, color: '#06B6D4', icon: 'snowflake' },
+    { id: scopeAce, name: 'Ace of Diamonds', type: 'scope' as const, color: '#DC2626', icon: 'diamond' },
 
     // --- PURPOSE (finalita') ---
-    { id: uuid(), name: 'Da dividere con Mirko', type: 'purpose' as const, color: '#F97316', icon: 'split' },
-    { id: uuid(), name: 'Versamento c/capitale', type: 'purpose' as const, color: '#14B8A6', icon: 'arrow-down-to-line' },
-    { id: uuid(), name: 'Scaricabile IVA', type: 'purpose' as const, color: '#84CC16', icon: 'receipt' },
-    { id: uuid(), name: 'Per conto parenti', type: 'purpose' as const, color: '#D946EF', icon: 'heart-handshake' },
-    { id: uuid(), name: 'Accantonamento figli', type: 'purpose' as const, color: '#EC4899', icon: 'baby' },
+    { id: uuid(), name: 'Da dividere con Mirko', type: 'purpose' as const, color: '#F97316', icon: 'split', parentId: scopeVS },
+    { id: uuid(), name: 'Versamento c/capitale', type: 'purpose' as const, color: '#14B8A6', icon: 'arrow-down-to-line', parentId: scopeKairos },
+    { id: uuid(), name: 'Scaricabile IVA', type: 'purpose' as const, color: '#84CC16', icon: 'receipt', parentId: scopeKairos },
+    { id: uuid(), name: 'Per conto parenti', type: 'purpose' as const, color: '#D946EF', icon: 'heart-handshake', parentId: scopeFamiliare },
+    { id: uuid(), name: 'Accantonamento figli', type: 'purpose' as const, color: '#EC4899', icon: 'baby', parentId: scopeFamiliare },
 
-    // --- CATEGORY (cosa) - Spese personali/familiari ---
-    { id: uuid(), name: 'Affitto', type: 'category' as const, color: '#6366F1', icon: 'home' },
-    { id: uuid(), name: 'Box', type: 'category' as const, color: '#6366F1', icon: 'car' },
-    { id: uuid(), name: 'Bollette', type: 'category' as const, color: '#F59E0B', icon: 'zap' },
-    { id: uuid(), name: 'Acqua', type: 'category' as const, color: '#06B6D4', icon: 'droplets' },
-    { id: uuid(), name: 'Spesa alimentare', type: 'category' as const, color: '#22C55E', icon: 'shopping-cart' },
-    { id: uuid(), name: 'Scuola', type: 'category' as const, color: '#8B5CF6', icon: 'book-open' },
-    { id: uuid(), name: 'Milano Ristorazione', type: 'category' as const, color: '#F97316', icon: 'utensils' },
-    { id: uuid(), name: 'Baby Sitter', type: 'category' as const, color: '#EC4899', icon: 'baby' },
-    { id: uuid(), name: 'Pulizie casa', type: 'category' as const, color: '#14B8A6', icon: 'sparkles' },
-    { id: uuid(), name: 'Automobile', type: 'category' as const, color: '#64748B', icon: 'car' },
-    { id: uuid(), name: 'Telepass', type: 'category' as const, color: '#3B82F6', icon: 'toll' },
-    { id: uuid(), name: 'Assicurazioni', type: 'category' as const, color: '#DC2626', icon: 'shield' },
-    { id: uuid(), name: 'Assicurazioni familiari', type: 'category' as const, color: '#DC2626', icon: 'shield-check' },
-    { id: uuid(), name: 'Carta di credito', type: 'category' as const, color: '#C5A44E', icon: 'credit-card' },
-    { id: uuid(), name: 'Vacanze e viaggi', type: 'category' as const, color: '#0EA5E9', icon: 'plane' },
-    { id: uuid(), name: 'Regali', type: 'category' as const, color: '#F43F5E', icon: 'gift' },
-    { id: uuid(), name: 'Palestra', type: 'category' as const, color: '#22C55E', icon: 'dumbbell' },
-    { id: uuid(), name: 'Capelli', type: 'category' as const, color: '#A855F7', icon: 'scissors' },
-    { id: uuid(), name: 'Beneficenza', type: 'category' as const, color: '#F472B6', icon: 'heart' },
-    { id: uuid(), name: 'Comunita\' ebraica', type: 'category' as const, color: '#2563EB', icon: 'star' },
-    { id: uuid(), name: 'Attivita\' familiari e sportive', type: 'category' as const, color: '#10B981', icon: 'trophy' },
+    // --- CATEGORY (cosa) - Personale: spese quotidiane ---
+    { id: uuid(), name: 'Affitto', type: 'category' as const, color: '#6366F1', icon: 'home', parentId: scopePersonale },
+    { id: uuid(), name: 'Box', type: 'category' as const, color: '#6366F1', icon: 'car', parentId: scopePersonale },
+    { id: uuid(), name: 'Bollette', type: 'category' as const, color: '#F59E0B', icon: 'zap', parentId: scopePersonale },
+    { id: uuid(), name: 'Acqua', type: 'category' as const, color: '#06B6D4', icon: 'droplets', parentId: scopePersonale },
+    { id: uuid(), name: 'Spesa alimentare', type: 'category' as const, color: '#22C55E', icon: 'shopping-cart', parentId: scopePersonale },
+    { id: uuid(), name: 'Automobile', type: 'category' as const, color: '#64748B', icon: 'car', parentId: scopePersonale },
+    { id: uuid(), name: 'Telepass', type: 'category' as const, color: '#3B82F6', icon: 'toll', parentId: scopePersonale },
+    { id: uuid(), name: 'Assicurazioni', type: 'category' as const, color: '#DC2626', icon: 'shield', parentId: scopePersonale },
+    { id: uuid(), name: 'Carta di credito', type: 'category' as const, color: '#C5A44E', icon: 'credit-card', parentId: scopePersonale },
+    { id: uuid(), name: 'Palestra', type: 'category' as const, color: '#22C55E', icon: 'dumbbell', parentId: scopePersonale },
+    { id: uuid(), name: 'Capelli', type: 'category' as const, color: '#A855F7', icon: 'scissors', parentId: scopePersonale },
+    { id: uuid(), name: 'Beneficenza', type: 'category' as const, color: '#F472B6', icon: 'heart', parentId: scopePersonale },
+    { id: uuid(), name: 'Whoop', type: 'category' as const, color: '#000000', icon: 'watch', parentId: scopePersonale },
+    { id: uuid(), name: 'Commercialista personale', type: 'category' as const, color: '#475569', icon: 'calculator', parentId: scopePersonale },
 
-    // --- CATEGORY - Tasse e imposte ---
-    { id: uuid(), name: 'TARI', type: 'category' as const, color: '#EF4444', icon: 'file-text' },
-    { id: uuid(), name: 'F24 - IVA', type: 'category' as const, color: '#DC2626', icon: 'file-text' },
-    { id: uuid(), name: 'F24 - IRPEF', type: 'category' as const, color: '#DC2626', icon: 'file-text' },
-    { id: uuid(), name: 'F24 - Cedolini', type: 'category' as const, color: '#DC2626', icon: 'file-text' },
-    { id: uuid(), name: 'Multe', type: 'category' as const, color: '#EF4444', icon: 'alert-triangle' },
+    // --- CATEGORY - Personale: tasse e imposte ---
+    { id: uuid(), name: 'TARI', type: 'category' as const, color: '#EF4444', icon: 'file-text', parentId: scopePersonale },
+    { id: uuid(), name: 'F24 - IVA', type: 'category' as const, color: '#DC2626', icon: 'file-text', parentId: scopePersonale },
+    { id: uuid(), name: 'F24 - IRPEF', type: 'category' as const, color: '#DC2626', icon: 'file-text', parentId: scopePersonale },
+    { id: uuid(), name: 'F24 - Cedolini', type: 'category' as const, color: '#DC2626', icon: 'file-text', parentId: scopePersonale },
+    { id: uuid(), name: 'Multe', type: 'category' as const, color: '#EF4444', icon: 'alert-triangle', parentId: scopePersonale },
 
-    // --- CATEGORY - Subscriptions / Strumenti ---
-    { id: uuid(), name: 'Netflix', type: 'category' as const, color: '#E50914', icon: 'tv' },
-    { id: uuid(), name: 'Disney+', type: 'category' as const, color: '#113CCF', icon: 'tv' },
-    { id: uuid(), name: 'Amazon Prime', type: 'category' as const, color: '#FF9900', icon: 'tv' },
-    { id: uuid(), name: 'YouTube', type: 'category' as const, color: '#FF0000', icon: 'tv' },
-    { id: uuid(), name: 'Spotify', type: 'category' as const, color: '#1DB954', icon: 'music' },
-    { id: uuid(), name: 'Notion', type: 'category' as const, color: '#000000', icon: 'layout' },
-    { id: uuid(), name: 'ChatGPT', type: 'category' as const, color: '#10A37F', icon: 'bot' },
-    { id: uuid(), name: 'Claude', type: 'category' as const, color: '#D4A574', icon: 'bot' },
-    { id: uuid(), name: 'Google Premium', type: 'category' as const, color: '#4285F4', icon: 'search' },
-    { id: uuid(), name: 'TradingView', type: 'category' as const, color: '#2962FF', icon: 'bar-chart' },
-    { id: uuid(), name: 'VPN/VPS', type: 'category' as const, color: '#6366F1', icon: 'shield' },
-    { id: uuid(), name: 'Domini', type: 'category' as const, color: '#64748B', icon: 'globe' },
-    { id: uuid(), name: 'Software e abbonamenti', type: 'category' as const, color: '#8B5CF6', icon: 'package' },
+    // --- CATEGORY - Personale: abbonamenti e strumenti ---
+    { id: uuid(), name: 'Netflix', type: 'category' as const, color: '#E50914', icon: 'tv', parentId: scopePersonale },
+    { id: uuid(), name: 'Disney+', type: 'category' as const, color: '#113CCF', icon: 'tv', parentId: scopePersonale },
+    { id: uuid(), name: 'Amazon Prime', type: 'category' as const, color: '#FF9900', icon: 'tv', parentId: scopePersonale },
+    { id: uuid(), name: 'YouTube', type: 'category' as const, color: '#FF0000', icon: 'tv', parentId: scopePersonale },
+    { id: uuid(), name: 'Spotify', type: 'category' as const, color: '#1DB954', icon: 'music', parentId: scopePersonale },
+    { id: uuid(), name: 'Notion', type: 'category' as const, color: '#000000', icon: 'layout', parentId: scopePersonale },
+    { id: uuid(), name: 'ChatGPT', type: 'category' as const, color: '#10A37F', icon: 'bot', parentId: scopePersonale },
+    { id: uuid(), name: 'Claude', type: 'category' as const, color: '#D4A574', icon: 'bot', parentId: scopePersonale },
+    { id: uuid(), name: 'Google Premium', type: 'category' as const, color: '#4285F4', icon: 'search', parentId: scopePersonale },
+    { id: uuid(), name: 'VPN/VPS', type: 'category' as const, color: '#6366F1', icon: 'shield', parentId: scopePersonale },
+    { id: uuid(), name: 'Domini', type: 'category' as const, color: '#64748B', icon: 'globe', parentId: scopePersonale },
+    { id: uuid(), name: 'Software e abbonamenti', type: 'category' as const, color: '#8B5CF6', icon: 'package', parentId: scopePersonale },
 
-    // --- CATEGORY - Business ---
-    { id: uuid(), name: 'Commercialista personale', type: 'category' as const, color: '#475569', icon: 'calculator' },
-    { id: uuid(), name: 'Commercialista aziendale', type: 'category' as const, color: '#475569', icon: 'calculator' },
-    { id: uuid(), name: 'Assicurazioni professionali', type: 'category' as const, color: '#DC2626', icon: 'shield' },
-    { id: uuid(), name: 'Collaboratori', type: 'category' as const, color: '#F97316', icon: 'users' },
-    { id: uuid(), name: 'Ufficio', type: 'category' as const, color: '#64748B', icon: 'building-2' },
-    { id: uuid(), name: 'PEC', type: 'category' as const, color: '#3B82F6', icon: 'mail' },
-    { id: uuid(), name: 'Fatturazione elettronica', type: 'category' as const, color: '#14B8A6', icon: 'file-check' },
-    { id: uuid(), name: 'Whoop', type: 'category' as const, color: '#000000', icon: 'watch' },
+    // --- CATEGORY - Familiare ---
+    { id: uuid(), name: 'Scuola', type: 'category' as const, color: '#8B5CF6', icon: 'book-open', parentId: scopeFamiliare },
+    { id: uuid(), name: 'Milano Ristorazione', type: 'category' as const, color: '#F97316', icon: 'utensils', parentId: scopeFamiliare },
+    { id: uuid(), name: 'Baby Sitter', type: 'category' as const, color: '#EC4899', icon: 'baby', parentId: scopeFamiliare },
+    { id: uuid(), name: 'Pulizie casa', type: 'category' as const, color: '#14B8A6', icon: 'sparkles', parentId: scopeFamiliare },
+    { id: uuid(), name: 'Assicurazioni familiari', type: 'category' as const, color: '#DC2626', icon: 'shield-check', parentId: scopeFamiliare },
+    { id: uuid(), name: 'Vacanze e viaggi', type: 'category' as const, color: '#0EA5E9', icon: 'plane', parentId: scopeFamiliare },
+    { id: uuid(), name: 'Regali', type: 'category' as const, color: '#F43F5E', icon: 'gift', parentId: scopeFamiliare },
+    { id: uuid(), name: 'Comunita\' ebraica', type: 'category' as const, color: '#2563EB', icon: 'star', parentId: scopeFamiliare },
+    { id: uuid(), name: 'Attivita\' familiari e sportive', type: 'category' as const, color: '#10B981', icon: 'trophy', parentId: scopeFamiliare },
 
-    // --- CATEGORY - Entrate ---
-    { id: uuid(), name: 'Coreografia', type: 'category' as const, color: '#22C55E', icon: 'music-2' },
-    { id: uuid(), name: 'Insegnamento', type: 'category' as const, color: '#22C55E', icon: 'graduation-cap' },
-    { id: uuid(), name: 'Formazione / Speaker', type: 'category' as const, color: '#22C55E', icon: 'mic' },
-    { id: uuid(), name: 'Consulenza', type: 'category' as const, color: '#22C55E', icon: 'briefcase' },
-    { id: uuid(), name: 'Corsi VS / Opzionetika', type: 'category' as const, color: '#22C55E', icon: 'presentation' },
-    { id: uuid(), name: 'Earnings (trading)', type: 'category' as const, color: '#22C55E', icon: 'trending-up' },
+    // --- CATEGORY - Aziendale Kairos ---
+    { id: uuid(), name: 'Commercialista aziendale', type: 'category' as const, color: '#475569', icon: 'calculator', parentId: scopeKairos },
+    { id: uuid(), name: 'Assicurazioni professionali', type: 'category' as const, color: '#DC2626', icon: 'shield', parentId: scopeKairos },
+    { id: uuid(), name: 'Collaboratori', type: 'category' as const, color: '#F97316', icon: 'users', parentId: scopeKairos },
+    { id: uuid(), name: 'Ufficio', type: 'category' as const, color: '#64748B', icon: 'building-2', parentId: scopeKairos },
+    { id: uuid(), name: 'PEC', type: 'category' as const, color: '#3B82F6', icon: 'mail', parentId: scopeKairos },
+    { id: uuid(), name: 'Fatturazione elettronica', type: 'category' as const, color: '#14B8A6', icon: 'file-check', parentId: scopeKairos },
+
+    // --- CATEGORY - VS / Opzionetika ---
+    { id: uuid(), name: 'TradingView', type: 'category' as const, color: '#2962FF', icon: 'bar-chart', parentId: scopeVS },
+    { id: uuid(), name: 'Corsi VS / Opzionetika', type: 'category' as const, color: '#22C55E', icon: 'presentation', parentId: scopeVS },
+    { id: uuid(), name: 'Earnings (trading)', type: 'category' as const, color: '#22C55E', icon: 'trending-up', parentId: scopeVS },
+
+    // --- CATEGORY - Ghiaccio Spettacolo ---
+    { id: uuid(), name: 'Coreografia', type: 'category' as const, color: '#22C55E', icon: 'music-2', parentId: scopeGhiaccio },
+    { id: uuid(), name: 'Insegnamento', type: 'category' as const, color: '#22C55E', icon: 'graduation-cap', parentId: scopeGhiaccio },
+    { id: uuid(), name: 'Formazione / Speaker', type: 'category' as const, color: '#22C55E', icon: 'mic', parentId: scopeGhiaccio },
+
+    // --- CATEGORY - Ace of Diamonds ---
+    { id: uuid(), name: 'Consulenza', type: 'category' as const, color: '#22C55E', icon: 'briefcase', parentId: scopeAce },
   ]
 
   await db.insert(schema.tags).values(tagsData)

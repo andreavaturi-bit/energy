@@ -158,7 +158,8 @@ export function Tags() {
 
   const categories = useMemo(() => {
     if (!selectedScope) return []
-    return selectedScope.childNodes.filter((n) => n.type === 'category')
+    // Show all direct children of the selected scope (categories + purposes)
+    return selectedScope.childNodes
   }, [selectedScope])
 
   const columnTags = useMemo(() => {
@@ -166,9 +167,9 @@ export function Tags() {
     return selectedCategory.childNodes
   }, [selectedCategory])
 
-  // Orphan tags: no parent and no children
+  // Orphan tags: root-level nodes that are NOT scopes (categories/purposes without a parent)
   const orphanTags = useMemo(() => {
-    return fullTree.filter((n) => n.type !== 'scope' && n.childNodes.length === 0)
+    return fullTree.filter((n) => n.type !== 'scope')
   }, [fullTree])
 
   // Keep selections in sync when data changes
