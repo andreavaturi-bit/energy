@@ -495,7 +495,7 @@ async function handleTransactions(
     let query = sb
       .from('transactions')
       .select(
-        '*, containers(name, color, currency), counterparties(name), beneficiarySubject:subjects!transactions_beneficiary_subject_id_subjects_id_fk(name)',
+        '*, containers(name, color, currency), counterparties(name), beneficiarySubject:subjects!transactions_beneficiary_subject_id_fkey(name)',
         { count: 'exact' },
       )
 
@@ -575,7 +575,7 @@ async function handleTransactions(
     if (splitParentIds.length > 0) {
       const { data: childRows } = await sb
         .from('transactions')
-        .select('*, beneficiarySubject:subjects!transactions_beneficiary_subject_id_subjects_id_fk(name), tags:transaction_tags(tags(id, name, color))')
+        .select('*, beneficiarySubject:subjects!transactions_beneficiary_subject_id_fkey(name), tags:transaction_tags(tags(id, name, color))')
         .in('split_parent_id', splitParentIds)
         .order('created_at')
 
@@ -607,7 +607,7 @@ async function handleTransactions(
     const { data, error } = await sb
       .from('transactions')
       .select(
-        '*, containers(name, color), counterparties(name), beneficiarySubject:subjects!transactions_beneficiary_subject_id_subjects_id_fk(name)',
+        '*, containers(name, color), counterparties(name), beneficiarySubject:subjects!transactions_beneficiary_subject_id_fkey(name)',
       )
       .eq('id', id)
       .single()
@@ -1025,7 +1025,7 @@ async function handleTransactions(
     const { data, error } = await sb
       .from('transactions')
       .select(
-        '*, containers(name, color), counterparties(name), beneficiarySubject:subjects!transactions_beneficiary_subject_id_subjects_id_fk(name)',
+        '*, containers(name, color), counterparties(name), beneficiarySubject:subjects!transactions_beneficiary_subject_id_fkey(name)',
       )
       .eq('id', txId)
       .single()
