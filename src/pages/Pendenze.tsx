@@ -331,9 +331,9 @@ function PendingSection({
           sorted.map((item) => {
             const cpName = getCounterpartyName(item.counterpartyId)
             return (
-              <div key={item.id} className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 px-4 sm:px-6 py-4 hover:bg-zinc-800/30 transition-colors">
-                <div className="flex items-center gap-3 sm:contents">
-                  <div className="shrink-0">
+              <div key={item.id} className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 px-4 sm:px-6 py-4 hover:bg-zinc-800/30 transition-colors">
+                <div className="flex items-start gap-3 sm:items-center sm:contents">
+                  <div className="shrink-0 mt-0.5 sm:mt-0">
                     {isOverdue(item.date) ? (
                       <AlertCircle className="h-4 w-4 text-red-400" />
                     ) : isUrgent(item.date) ? (
@@ -343,7 +343,7 @@ function PendingSection({
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-zinc-200 truncate">{item.description || 'Senza descrizione'}</p>
+                    <p className="text-sm font-medium text-zinc-200">{item.description || 'Senza descrizione'}</p>
                     <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                       {cpName && <span className="text-xs text-zinc-500">{cpName}</span>}
                       {cpName && <span className="text-xs text-zinc-600">|</span>}
@@ -357,7 +357,7 @@ function PendingSection({
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center justify-between sm:contents pl-7 sm:pl-0">
+                <div className="flex items-center justify-between sm:contents ml-7 sm:ml-0">
                   <div className="shrink-0 text-left sm:text-right">
                     <p className="text-xs text-zinc-500">Scadenza</p>
                     <p className={`text-sm ${isOverdue(item.date) ? 'text-red-400' : 'text-zinc-300'}`}>
