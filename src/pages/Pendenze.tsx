@@ -331,57 +331,61 @@ function PendingSection({
           sorted.map((item) => {
             const cpName = getCounterpartyName(item.counterpartyId)
             return (
-              <div key={item.id} className="flex items-center gap-4 px-6 py-4 hover:bg-zinc-800/30 transition-colors">
-                <div className="shrink-0">
-                  {isOverdue(item.date) ? (
-                    <AlertCircle className="h-4 w-4 text-red-400" />
-                  ) : isUrgent(item.date) ? (
-                    <AlertCircle className="h-4 w-4 text-amber-400" />
-                  ) : (
-                    <Clock className={`h-4 w-4 ${textColor}`} />
-                  )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-zinc-200">{item.description || 'Senza descrizione'}</p>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    {cpName && <span className="text-xs text-zinc-500">{cpName}</span>}
-                    {cpName && <span className="text-xs text-zinc-600">|</span>}
-                    <span className="text-xs text-zinc-500">{getContainerName(item.containerId)}</span>
-                    {item.notes && (
-                      <>
-                        <span className="text-xs text-zinc-600">-</span>
-                        <span className="text-xs text-zinc-500">{item.notes}</span>
-                      </>
+              <div key={item.id} className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 px-4 sm:px-6 py-4 hover:bg-zinc-800/30 transition-colors">
+                <div className="flex items-center gap-3 sm:contents">
+                  <div className="shrink-0">
+                    {isOverdue(item.date) ? (
+                      <AlertCircle className="h-4 w-4 text-red-400" />
+                    ) : isUrgent(item.date) ? (
+                      <AlertCircle className="h-4 w-4 text-amber-400" />
+                    ) : (
+                      <Clock className={`h-4 w-4 ${textColor}`} />
                     )}
                   </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-zinc-200 truncate">{item.description || 'Senza descrizione'}</p>
+                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                      {cpName && <span className="text-xs text-zinc-500">{cpName}</span>}
+                      {cpName && <span className="text-xs text-zinc-600">|</span>}
+                      <span className="text-xs text-zinc-500">{getContainerName(item.containerId)}</span>
+                      {item.notes && (
+                        <>
+                          <span className="text-xs text-zinc-600">-</span>
+                          <span className="text-xs text-zinc-500">{item.notes}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
                 </div>
-                <div className="shrink-0 text-right">
-                  <p className="text-xs text-zinc-500">Scadenza</p>
-                  <p className={`text-sm ${isOverdue(item.date) ? 'text-red-400' : 'text-zinc-300'}`}>
-                    {formatDate(item.date)}
+                <div className="flex items-center justify-between sm:contents pl-7 sm:pl-0">
+                  <div className="shrink-0 text-left sm:text-right">
+                    <p className="text-xs text-zinc-500">Scadenza</p>
+                    <p className={`text-sm ${isOverdue(item.date) ? 'text-red-400' : 'text-zinc-300'}`}>
+                      {formatDate(item.date)}
+                    </p>
+                    <p className={`text-xs ${isOverdue(item.date) ? 'text-red-400' : isUrgent(item.date) ? 'text-amber-400' : 'text-zinc-500'}`}>
+                      {daysUntil(item.date)}
+                    </p>
+                  </div>
+                  <p className={`shrink-0 text-sm font-semibold ${textColor} min-w-[80px] sm:min-w-[100px] text-right`}>
+                    {formatCurrency(Math.abs(parseFloat(item.amount)))}
                   </p>
-                  <p className={`text-xs ${isOverdue(item.date) ? 'text-red-400' : isUrgent(item.date) ? 'text-amber-400' : 'text-zinc-500'}`}>
-                    {daysUntil(item.date)}
-                  </p>
-                </div>
-                <p className={`shrink-0 text-sm font-semibold ${textColor} min-w-[100px] text-right`}>
-                  {formatCurrency(Math.abs(parseFloat(item.amount)))}
-                </p>
-                <div className="shrink-0 flex items-center gap-1">
-                  <button
-                    className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-emerald-400"
-                    title={`Segna come ${actionLabel.toLowerCase()}`}
-                    onClick={() => onResolve(item.id)}
-                  >
-                    <CheckCircle2 className="h-4 w-4" />
-                  </button>
-                  <button
-                    className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-red-400"
-                    title="Elimina"
-                    onClick={() => onDelete(item.id)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                  <div className="shrink-0 flex items-center gap-1">
+                    <button
+                      className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-emerald-400"
+                      title={`Segna come ${actionLabel.toLowerCase()}`}
+                      onClick={() => onResolve(item.id)}
+                    >
+                      <CheckCircle2 className="h-4 w-4" />
+                    </button>
+                    <button
+                      className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-red-400"
+                      title="Elimina"
+                      onClick={() => onDelete(item.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
             )
