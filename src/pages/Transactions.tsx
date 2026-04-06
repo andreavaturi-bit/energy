@@ -26,6 +26,7 @@ import {
   AlertCircle,
   Scissors,
   SlidersHorizontal,
+  Copy,
 } from 'lucide-react'
 import { SearchableSelect, SearchableMultiSelect } from '@/components/ui/SearchableSelect'
 import type { Transaction, TransactionType, TransactionStatus, Container, Counterparty, Subject, Tag } from '@/types'
@@ -126,6 +127,7 @@ function TransactionModal({
   onSave,
   existing,
   linkedTransaction,
+  prefill,
   containers,
   counterparties,
   subjects,
@@ -140,6 +142,7 @@ function TransactionModal({
   onSave: (data: Record<string, unknown>) => void
   existing?: Transaction | null
   linkedTransaction?: Transaction | null
+  prefill?: Transaction | null
   containers: Container[]
   counterparties: Counterparty[]
   subjects: Subject[]
@@ -151,7 +154,10 @@ function TransactionModal({
   onCreateTag?: (name: string) => void
 }) {
   const isEdit = !!existing
+  // Use existing for edit, or prefill for duplication defaults
+  const src = existing ?? prefill
   const isExistingTransfer = existing && (existing.type === 'transfer_out' || existing.type === 'transfer_in')
+  const isPrefillTransfer = !existing && prefill && (prefill.type === 'transfer_out' || prefill.type === 'transfer_in')
 
   // For transfers, figure out initial from/to containers
   let initialFromContainerId = ''
@@ -164,22 +170,30 @@ function TransactionModal({
       initialFromContainerId = linkedTransaction?.containerId ?? ''
       initialToContainerId = existing.containerId
     }
+  } else if (isPrefillTransfer) {
+    if (prefill.type === 'transfer_out') {
+      initialFromContainerId = prefill.containerId
+      initialToContainerId = linkedTransaction?.containerId ?? ''
+    } else {
+      initialFromContainerId = linkedTransaction?.containerId ?? ''
+      initialToContainerId = prefill.containerId
+    }
   }
 
   const [form, setForm] = useState({
-    date: existing?.date ?? new Date().toISOString().slice(0, 10),
-    description: existing?.description ?? '',
-    amount: existing ? String(Math.abs(parseFloat(existing.amount))) : '',
-    currency: existing?.currency ?? 'EUR',
-    containerId: existing?.containerId ?? (containers[0]?.id ?? ''),
+    date: prefill && !existing ? new Date().toISOString().slice(0, 10) : (src?.date ?? new Date().toISOString().slice(0, 10)),
+    description: src?.description ?? '',
+    amount: src ? String(Math.abs(parseFloat(src.amount))) : '',
+    currency: src?.currency ?? 'EUR',
+    containerId: src?.containerId ?? (containers[0]?.id ?? ''),
     fromContainerId: initialFromContainerId || (containers[0]?.id ?? ''),
     toContainerId: initialToContainerId,
-    counterpartyId: existing?.counterpartyId ?? '',
-    type: isExistingTransfer ? 'transfer' : (existing?.type ?? 'expense'),
-    status: (existing?.status ?? 'completed') as TransactionStatus,
-    notes: existing?.notes ?? '',
-    beneficiarySubjectId: existing?.beneficiarySubjectId ?? '',
-    tagIds: (existing?.tags || []).map(t => t.id),
+    counterpartyId: src?.counterpartyId ?? '',
+    type: (isExistingTransfer || isPrefillTransfer) ? 'transfer' : (src?.type ?? 'expense'),
+    status: (src?.status ?? 'completed') as TransactionStatus,
+    notes: src?.notes ?? '',
+    beneficiarySubjectId: src?.beneficiarySubjectId ?? '',
+    tagIds: (src?.tags || []).map(t => t.id),
   })
 
   const isTransfer = form.type === 'transfer'
@@ -210,7 +224,7 @@ function TransactionModal({
         fromContainerId: form.fromContainerId,
         toContainerId: form.toContainerId,
         status: form.status,
-        source: existing?.source ?? 'manual',
+        source: 'manual',
         notes: form.notes || null,
       })
     } else {
@@ -229,7 +243,7 @@ function TransactionModal({
         counterpartyId: form.counterpartyId || null,
         type: form.type,
         status: form.status,
-        source: existing?.source ?? 'manual',
+        source: 'manual',
         notes: form.notes || null,
         beneficiarySubjectId: form.beneficiarySubjectId || null,
         tagIds: form.tagIds,
@@ -248,7 +262,7 @@ function TransactionModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <div className="w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
-          <h2 className="text-lg font-semibold text-zinc-100">{isEdit ? 'Modifica Transazione' : 'Nuova Transazione'}</h2>
+          <h2 className="text-lg font-semibold text-zinc-100">{isEdit ? 'Modifica Transazione' : prefill ? 'Duplica Transazione' : 'Nuova Transazione'}</h2>
           <button onClick={onClose} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200">
             <X className="h-5 w-5" />
           </button>
@@ -643,6 +657,7 @@ export function Transactions() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [showCreate, setShowCreate] = useState(false)
   const [editingTx, setEditingTx] = useState<Transaction | null>(null)
+  const [duplicatingTx, setDuplicatingTx] = useState<Transaction | null>(null)
   const [splittingTx, setSplittingTx] = useState<Transaction | null>(null)
 
   // Filter state — initialized from URL search params if present
@@ -782,6 +797,7 @@ export function Transactions() {
         queryClient.invalidateQueries({ queryKey: ['transactions'] })
         queryClient.invalidateQueries({ queryKey: ['stats'] })
         setShowCreate(false)
+        setDuplicatingTx(null)
       } catch (err) {
         setTransferError(err instanceof Error ? err.message : 'Errore nel salvataggio')
       } finally {
@@ -790,7 +806,7 @@ export function Transactions() {
     } else {
       const tagIds = (data.tagIds as string[] | undefined) ?? []
       createMutation.mutate({ ...(data as Partial<Transaction>), tagIds } as Partial<Transaction> & { tagIds?: string[] }, {
-        onSuccess: () => setShowCreate(false),
+        onSuccess: () => { setShowCreate(false); setDuplicatingTx(null) },
       })
     }
   }
@@ -1039,6 +1055,13 @@ export function Transactions() {
                   <Scissors className="h-3.5 w-3.5" />
                 </button>
               )}
+              <button
+                onClick={(e) => { e.stopPropagation(); setDuplicatingTx(tx) }}
+                className="rounded p-1.5 text-zinc-500 hover:text-blue-400 hover:bg-zinc-800 transition-colors"
+                title="Duplica"
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </button>
               <button
                 onClick={(e) => { e.stopPropagation(); setEditingTx(tx) }}
                 className="rounded p-1.5 text-zinc-500 hover:text-energy-400 hover:bg-zinc-800 transition-colors"
@@ -1482,6 +1505,29 @@ export function Transactions() {
       {showCreate && (
         <TransactionModal
           onClose={() => { setShowCreate(false); createMutation.reset(); setTransferError(null) }}
+          onSave={handleCreateTx}
+          containers={containers}
+          counterparties={counterparties}
+          subjects={subjects}
+          tags={tags}
+          isSaving={createMutation.isPending || transferSaving}
+          saveError={createErrorMsg}
+          onCreateCounterparty={handleCreateCounterparty}
+          onCreateSubject={handleCreateSubject}
+          onCreateTag={handleCreateTag}
+        />
+      )}
+
+      {/* ── Duplicate Modal ─────────────────────────────── */}
+      {duplicatingTx && (
+        <TransactionModal
+          prefill={duplicatingTx}
+          linkedTransaction={
+            duplicatingTx.transferLinkedId
+              ? transactions.find(t => t.id === duplicatingTx.transferLinkedId) ?? null
+              : null
+          }
+          onClose={() => { setDuplicatingTx(null); createMutation.reset(); setTransferError(null) }}
           onSave={handleCreateTx}
           containers={containers}
           counterparties={counterparties}
