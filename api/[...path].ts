@@ -495,12 +495,13 @@ async function handleTransactions(
     let query = sb
       .from('transactions')
       .select(
-        '*, containers(name, color, currency), counterparties(name), subjects!transactions_shared_with_subject_id_subjects_id_fk(name)',
+        '*, containers(name, color, currency), counterparties(name), beneficiarySubject:subjects!transactions_beneficiary_subject_id_fkey(name)',
         { count: 'exact' },
       )
 
     if (param('containerId')) query = query.eq('container_id', param('containerId')!)
     if (param('counterpartyId')) query = query.eq('counterparty_id', param('counterpartyId')!)
+    if (param('beneficiarySubjectId')) query = query.eq('beneficiary_subject_id', param('beneficiarySubjectId')!)
     if (param('type')) query = query.eq('type', param('type')!)
     if (param('status')) query = query.eq('status', param('status')!)
     if (param('dateFrom')) query = query.gte('date', param('dateFrom')!)
@@ -553,18 +554,51 @@ async function handleTransactions(
       const row = { ...r } as Record<string, unknown>
       const containers = row.containers as { name?: string; color?: string; currency?: string } | null
       const counterparties = row.counterparties as { name?: string } | null
-      const subjects = row.subjects as { name?: string } | null
+      const beneficiarySubject = row.beneficiarySubject as { name?: string } | null
       row.container_name = containers?.name ?? null
       row.container_color = containers?.color ?? null
       row.container_currency = containers?.currency ?? null
       row.counterparty_name = counterparties?.name ?? null
-      row.shared_with_name = subjects?.name ?? null
+      row.beneficiary_name = beneficiarySubject?.name ?? null
       row.tags = tagsByTxId.get(row.id as string) || []
       delete row.containers
       delete row.counterparties
-      delete row.subjects
+      delete row.beneficiarySubject
       return row
     })
+
+    // Load split children for parent-split transactions
+    const splitParentIds = rows
+      .filter((r: Record<string, unknown>) => r.status === 'split')
+      .map((r: Record<string, unknown>) => r.id as string)
+
+    if (splitParentIds.length > 0) {
+      const { data: childRows } = await sb
+        .from('transactions')
+        .select('*, beneficiarySubject:subjects!transactions_beneficiary_subject_id_fkey(name), tags:transaction_tags(tags(id, name, color))')
+        .in('split_parent_id', splitParentIds)
+        .order('created_at')
+
+      const childrenByParent = new Map<string, unknown[]>()
+      for (const child of childRows || []) {
+        const c = child as Record<string, unknown>
+        // Flatten beneficiary
+        const bs = c.beneficiarySubject as { name?: string } | null
+        c.beneficiary_name = bs?.name ?? null
+        delete c.beneficiarySubject
+        // Flatten tags
+        const rawTags = c.tags as Array<{ tags: Record<string, unknown> }> | null
+        c.tags = (rawTags || []).map(t => t.tags).filter(Boolean)
+        const pid = c.split_parent_id as string
+        if (!childrenByParent.has(pid)) childrenByParent.set(pid, [])
+        childrenByParent.get(pid)!.push(c)
+      }
+      for (const row of rows) {
+        if ((row as Record<string, unknown>).status === 'split') {
+          (row as Record<string, unknown>).split_children = childrenByParent.get((row as Record<string, unknown>).id as string) || []
+        }
+      }
+    }
 
     return ok(res, { rows, total: count ?? 0, limit, offset })
   }
@@ -573,7 +607,7 @@ async function handleTransactions(
     const { data, error } = await sb
       .from('transactions')
       .select(
-        '*, containers(name, color), counterparties(name), subjects!transactions_shared_with_subject_id_subjects_id_fk(name)',
+        '*, containers(name, color), counterparties(name), beneficiarySubject:subjects!transactions_beneficiary_subject_id_fkey(name)',
       )
       .eq('id', id)
       .single()
@@ -590,14 +624,14 @@ async function handleTransactions(
     const row = { ...data } as Record<string, unknown>
     const containers = row.containers as { name?: string; color?: string } | null
     const counterparties = row.counterparties as { name?: string } | null
-    const subjects = row.subjects as { name?: string } | null
+    const beneficiarySubject = row.beneficiarySubject as { name?: string } | null
     row.container_name = containers?.name ?? null
     row.container_color = containers?.color ?? null
     row.counterparty_name = counterparties?.name ?? null
-    row.shared_with_name = subjects?.name ?? null
+    row.beneficiary_name = beneficiarySubject?.name ?? null
     delete row.containers
     delete row.counterparties
-    delete row.subjects
+    delete row.beneficiarySubject
 
     return ok(res, { ...row, tags })
   }
@@ -759,8 +793,7 @@ async function handleTransactions(
       transfer_linked_id: b.transferLinkedId ?? null,
       status: b.status ?? 'completed',
       source: b.source ?? 'manual',
-      shared_with_subject_id: b.sharedWithSubjectId ?? null,
-      share_percentage: b.sharePercentage ?? null,
+      beneficiary_subject_id: b.beneficiarySubjectId ?? null,
       installment_plan_id: b.installmentPlanId ?? null,
       installment_number: b.installmentNumber ?? null,
       external_id: b.externalId ?? null,
@@ -838,6 +871,76 @@ async function handleTransactions(
   // POST transfer — create a linked transfer pair
   // Detect via query ?action=transfer OR body _action:'transfer'
   const bodyAction = (req.body as Record<string, unknown>)?._action
+
+  // ── SPLIT ──────────────────────────────────────────────────────
+  if (method === 'POST' && bodyAction === 'split') {
+    const b = req.body as Record<string, unknown>
+    const parentId = b.parentId as string
+    const children = b.children as Array<{
+      description?: string
+      amount: string
+      tagIds?: string[]
+      beneficiarySubjectId?: string | null
+      notes?: string | null
+    }>
+
+    if (!parentId || !children?.length) return badRequest(res, 'parentId e children sono obbligatori')
+
+    const { data: parent, error: parentErr } = await sb
+      .from('transactions').select('*').eq('id', parentId).single()
+    if (parentErr || !parent) return notFound(res, 'Transazione non trovata')
+
+    const p = parent as Record<string, unknown>
+    const parentAmt = Math.abs(parseFloat(p.amount as string))
+    const childrenSum = children.reduce((s, c) => s + Math.abs(parseFloat(c.amount)), 0)
+    if (Math.abs(parentAmt - childrenSum) > 0.01) {
+      return badRequest(res, `La somma delle imputazioni (${childrenSum.toFixed(2)}) non corrisponde all'importo (${parentAmt.toFixed(2)})`)
+    }
+
+    await sb.from('transactions')
+      .update({ status: 'split', updated_at: new Date().toISOString() })
+      .eq('id', parentId)
+
+    const isOut = parseFloat(p.amount as string) < 0
+    const createdChildren = []
+    for (const child of children) {
+      const childAmt = isOut ? -Math.abs(parseFloat(child.amount)) : Math.abs(parseFloat(child.amount))
+      const { data: created, error: childErr } = await sb.from('transactions').insert({
+        date: p.date,
+        description: child.description || p.description,
+        amount: childAmt.toFixed(4),
+        currency: p.currency,
+        container_id: p.container_id,
+        type: p.type,
+        status: 'completed',
+        source: 'manual',
+        split_parent_id: parentId,
+        beneficiary_subject_id: child.beneficiarySubjectId ?? null,
+        notes: child.notes ?? null,
+      }).select().single()
+      if (childErr || !created) continue
+      createdChildren.push(created)
+      if (child.tagIds?.length) {
+        await sb.from('transaction_tags').insert(
+          child.tagIds.map((tagId: string) => ({ transaction_id: (created as Record<string,unknown>).id, tag_id: tagId }))
+        )
+      }
+    }
+    return ok(res, { parent: { ...p, status: 'split' }, children: createdChildren })
+  }
+
+  // ── UNSPLIT ────────────────────────────────────────────────────
+  if (method === 'POST' && bodyAction === 'unsplit') {
+    const b = req.body as Record<string, unknown>
+    const parentId = b.parentId as string
+    if (!parentId) return badRequest(res, 'parentId e obbligatorio')
+    await sb.from('transactions').delete().eq('split_parent_id', parentId)
+    await sb.from('transactions')
+      .update({ status: 'completed', updated_at: new Date().toISOString() })
+      .eq('id', parentId)
+    return ok(res, { unsplit: true })
+  }
+
   if (method === 'POST' && (actionParam === 'transfer' || bodyAction === 'transfer')) {
     const b = req.body || {}
     if (!b.date || !b.amount || !b.fromContainerId || !b.toContainerId) {
@@ -992,7 +1095,7 @@ async function handleTransactions(
     const { data, error } = await sb
       .from('transactions')
       .select(
-        '*, containers(name, color), counterparties(name), subjects!transactions_shared_with_subject_id_subjects_id_fk(name)',
+        '*, containers(name, color), counterparties(name), beneficiarySubject:subjects!transactions_beneficiary_subject_id_fkey(name)',
       )
       .eq('id', txId)
       .single()
@@ -1007,14 +1110,14 @@ async function handleTransactions(
     const row = { ...data } as Record<string, unknown>
     const containers = row.containers as { name?: string; color?: string } | null
     const counterparties = row.counterparties as { name?: string } | null
-    const subjects = row.subjects as { name?: string } | null
+    const beneficiarySubject = row.beneficiarySubject as { name?: string } | null
     row.container_name = containers?.name ?? null
     row.container_color = containers?.color ?? null
     row.counterparty_name = counterparties?.name ?? null
-    row.shared_with_name = subjects?.name ?? null
+    row.beneficiary_name = beneficiarySubject?.name ?? null
     delete row.containers
     delete row.counterparties
-    delete row.subjects
+    delete row.beneficiarySubject
 
     return ok(res, { ...row, tags })
   }
@@ -1039,8 +1142,7 @@ async function handleTransactions(
     if (b.type !== undefined) update.type = b.type
     if (b.transferLinkedId !== undefined) update.transfer_linked_id = b.transferLinkedId
     if (b.status !== undefined) update.status = b.status
-    if (b.sharedWithSubjectId !== undefined) update.shared_with_subject_id = b.sharedWithSubjectId
-    if (b.sharePercentage !== undefined) update.share_percentage = b.sharePercentage
+    if (b.beneficiarySubjectId !== undefined) update.beneficiary_subject_id = b.beneficiarySubjectId || null
 
     const { data, error } = await sb
       .from('transactions')
@@ -1106,8 +1208,7 @@ async function handleTransactions(
         transfer_linked_id: b.transferLinkedId ?? null,
         status: b.status ?? 'completed',
         source: b.source ?? 'manual',
-        shared_with_subject_id: b.sharedWithSubjectId ?? null,
-        share_percentage: b.sharePercentage ?? null,
+        beneficiary_subject_id: b.beneficiarySubjectId ?? null,
         installment_plan_id: b.installmentPlanId ?? null,
         installment_number: b.installmentNumber ?? null,
         external_id: b.externalId ?? null,
@@ -1924,6 +2025,7 @@ async function handleStats(
       .from('transactions')
       .select('id, amount, date')
       .neq('status', 'cancelled')
+      .neq('status', 'split')
       .neq('type', 'transfer_in')
       .neq('type', 'transfer_out')
     if (dateFrom) txQuery = txQuery.gte('date', dateFrom)
@@ -2050,6 +2152,7 @@ async function handleStats(
       .select('date, amount, type')
       .gte('date', startStr)
       .neq('status', 'cancelled')
+      .neq('status', 'split')
     if (endStr) query = query.lte('date', endStr)
     if (containerId) query = query.eq('container_id', containerId)
 
@@ -2128,6 +2231,7 @@ async function handleStats(
         .select('amount')
         .in('container_id', activeIds)
         .neq('status', 'cancelled')
+        .neq('status', 'split')
       for (const tx of balanceTxs || []) {
         totalBalance += parseFloat(tx.amount as string) || 0
       }
@@ -2161,6 +2265,7 @@ async function handleStats(
         .select('container_id, amount')
         .in('container_id', activeIds)
         .neq('status', 'cancelled')
+        .neq('status', 'split')
     : { data: [] }
 
   const txSumMap = new Map<string, number>()
@@ -2196,6 +2301,7 @@ async function handleStats(
     .gte('date', monthStart)
     .lt('date', nextMonth)
     .neq('status', 'cancelled')
+    .neq('status', 'split')
 
   let monthlyIncome = 0
   let monthlyExpenses = 0
@@ -2596,6 +2702,424 @@ async function handleSmartRules(
 }
 
 // ============================================================
+// SEED — import real categories/tags/counterparties from Notion data
+// ============================================================
+
+const NOTION_AREAS: Record<string, string[]> = {
+  'Casa e dintorni': ['Affitto','Bollette','Box','Pulizie casalinghe','Lavori, manutenzione e riparazioni','Mobili, arredamenti e simili','Elettrodomestici'],
+  'Mangiare e dintorni': ['Panetteria','Bar','Pizzeria','Torte, dolci, pasticcini, etc','Sushi','Ristorante','Supermercato, mercato o spesa','Home delivery','Fruttivendolo, mercato, etc','Pub, locali, drink, etc','Fast food e dintorni','Acqua'],
+  'Figli, famiglia e amici': ['Assicurazioni','Giocattoli','Vacanze e villeggiature','Regali','Cancelleria','Massimo','Sarah','Samuele','Valeria','Scuola','Nonna Paola','Attività varie bambini (sport, extrascolastiche, etc)','Baby Sitter'],
+  'Trasporti e spostamenti vari': ['Riparazione auto','Lavaggio auto','Noleggio Auto','Mezzi pubblici','Monopattini','Parcheggi','Hotel','Carburante','Voli aerei','Treni','Car sharing','Taxi','Pedaggi autostradali','Additivi x auto e simili','Rata Automobile'],
+  'Abbigliamento e dintorni': ['Abbigliamento e vestiti','Scarpe','Attrezzature varie','Tintoria'],
+  'Tech e hardware': ['Accessori e tecnologia','Telefonia'],
+  'Formazione e crescita': ['Corsi','Newsletter e membership finanziarie','Libri'],
+  'Healthcare & esthetics': ['Visite mediche','Estetista','Farmacia e terapie varie','Barbiere','Fisioterapia, osteopatia e massaggi','Igiene e cura della persona','Integratori','Capelli'],
+  'Spese aziendali': ['Lavoro online (UpWork, Fiverr, etc)','Spese aziendali x Kairòs','Spese aziendali x Shuffle','Finanziamento Soci'],
+  'Sport e fitness': ['Fitness, palestra e Calisthenics','Tennis, ping pong, padel e simili','Sci, snowboard, snowskates, etc'],
+  'Media': ['Film','Musica','Abbonamenti TV'],
+  'App e software': ['Software e App','Domini, hosting e VPS'],
+  'Divertimento e hobby': ['Feste','Teatro, spettacoli e simili','Piscine, funivie, parchi divertimenti e simili','Cinema','Hobby'],
+  'Contributi': ['F24','Tasse','Beneficenza'],
+  'Errori e inefficienze': ['Spese legali','Multe'],
+  'Costi finanziari': ['Commercialista','Spese bancarie e commissioni','Documenti, marche da bollo, etc'],
+  'Varie & eventuali': ['Costi di spedizione','Acquisti online','Boh!'],
+  'Pendenze e compensazioni': ['Prestito','Compensazioni, residui, restituzioni e movimenti vari'],
+}
+
+const NOTION_UNASSIGNED_CATEGORIES = ['Spese aziendali x Gruppo VS','Spese x Coreografia','Viaggi, gite, escursioni, etc','Pocket Money']
+
+const NOTION_AREA_COLORS: Record<string, string> = {
+  'Casa e dintorni': '#3b82f6',
+  'Mangiare e dintorni': '#f97316',
+  'Figli, famiglia e amici': '#ec4899',
+  'Trasporti e spostamenti vari': '#6366f1',
+  'Abbigliamento e dintorni': '#8b5cf6',
+  'Tech e hardware': '#06b6d4',
+  'Formazione e crescita': '#14b8a6',
+  'Healthcare & esthetics': '#ef4444',
+  'Spese aziendali': '#64748b',
+  'Sport e fitness': '#22c55e',
+  'Media': '#a855f7',
+  'App e software': '#0ea5e9',
+  'Divertimento e hobby': '#f59e0b',
+  'Contributi': '#dc2626',
+  'Errori e inefficienze': '#b91c1c',
+  'Costi finanziari': '#78716c',
+  'Varie & eventuali': '#9ca3af',
+  'Pendenze e compensazioni': '#d97706',
+}
+
+const NOTION_COUNTERPARTIES = [
+  'Ace of Diamonds SRL','Alessandro Liberatore','Alessia Tornaghi','Alex Zlatkov','Alexandra Odman',
+  'Alexia Paganini','Ana Sofia Beschea','Antena TV','Awe Sport','Black SRL','Brunico',
+  'Bulgaria - Club Velichkova','CUS Torino','Chiara Salducco','Cliente VS/Opz',
+  'Club di pattinaggio Bellinzona','Comitato Regionale Veneto','Corona Brașov','Danilo Gelao',
+  'Daria Troi','David Cipolleschi','Davide Biocchi',
+  'Deutsche Eislauf-Union | Federazione tedesca','Diana Lapierre','Dreaming Ice ASD',
+  'EFFENNE SRL','Eis Club Gardena','Elisa Brunico','FISG','Giada Romiti','Gianluca De Risi',
+  'Gioia Fiori','INPS','Ice Angels - Feltre','Ice Club Arau (Annette)','Ice Emotion',
+  'Il Gatto e la Volpe nel web','Irene D\'Auria','Irma Caldara e Riccardo Maglio',
+  'Julia Grabowski','Kai Jagoda','Kairòs SRLS','Leasys','Liri','Louis Weissert',
+  'Luca Fuenfert','Lukas Britschgi','Léa Serna','MBA Mutua','Mamma','Marco Viotto',
+  'Massimo','Milla Ruud & Nikolaj Majorov','Mirko Castignani','Nicole Schott','Noah Bodenstein',
+  'POLSKI ZWIĄZEK | Federazione polacca','Papà','Pietro Mazzetti','Ramona Andreea Voicu',
+  'Rotelle','Scacco Matto SRLS','Seregno 2012','Shuffle SRL','Simo','Stefano Russo',
+  'Unfair Advantage SRL','Vale','Valentina Russo','Varie ed eventuali','Zio Gigio','iceDOME',
+]
+
+const NOTION_ACTIVITIES = [
+  { name: 'Performance', ambito: 'PATTINAGGIO' },
+  { name: 'Direzione artistica', ambito: 'PATTINAGGIO' },
+  { name: 'Coreografia/Insegnamento', ambito: 'PATTINAGGIO' },
+  { name: 'Vantaggio Sleale / Opzionetika', ambito: 'FINANZA' },
+  { name: 'Ghiaccio_Spettacolo', ambito: 'PATTINAGGIO' },
+  { name: 'Speakeraggio e Presentazione', ambito: 'PATTINAGGIO' },
+  { name: 'Locali', ambito: 'ALTRO' },
+  { name: 'Restituzione prestiti, anticipi e rimborsi', ambito: 'ALTRO' },
+  { name: 'Assicurazioni', ambito: 'ALTRO' },
+  { name: 'Music editing', ambito: 'PATTINAGGIO' },
+  { name: 'Assistenza', ambito: 'ALTRO' },
+]
+
+async function handleSeed(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') return badRequest(res, 'Use POST to seed data')
+
+  const sb = getSupabase()
+  const results: string[] = []
+
+  // 1. Delete existing tags that are NOT linked to any transaction
+  const { data: usedTagIds } = await sb.from('transaction_tags').select('tag_id')
+  const usedSet = new Set((usedTagIds || []).map((r: { tag_id: string }) => r.tag_id))
+
+  const { data: existingTags } = await sb.from('tags').select('id, name')
+  const tagsToDelete = (existingTags || []).filter((t: { id: string }) => !usedSet.has(t.id))
+  if (tagsToDelete.length > 0) {
+    const ids = tagsToDelete.map((t: { id: string }) => t.id)
+    // Also clean recurrence_tags
+    await sb.from('recurrence_tags').delete().in('tag_id', ids)
+    await sb.from('tags').delete().in('id', ids)
+    results.push(`Deleted ${tagsToDelete.length} unused tags`)
+  }
+
+  // 2. Create Area tags (type = 'category', parent)
+  const areaIdMap = new Map<string, string>()
+
+  for (const [areaName, color] of Object.entries(NOTION_AREA_COLORS)) {
+    // Check if already exists
+    const { data: existing } = await sb.from('tags').select('id').eq('name', areaName).eq('type', 'category').limit(1)
+    if (existing && existing.length > 0) {
+      areaIdMap.set(areaName, existing[0].id)
+      continue
+    }
+    const { data: created, error } = await sb.from('tags').insert({
+      name: areaName,
+      type: 'category',
+      color,
+      is_active: true,
+    }).select('id').single()
+    if (error) {
+      results.push(`Error creating area "${areaName}": ${error.message}`)
+    } else if (created) {
+      areaIdMap.set(areaName, created.id)
+    }
+  }
+  results.push(`Created/found ${areaIdMap.size} areas`)
+
+  // 3. Create Category tags (type = 'purpose', with parentId)
+  let catCount = 0
+  for (const [areaName, categories] of Object.entries(NOTION_AREAS)) {
+    const parentId = areaIdMap.get(areaName) || null
+    for (const catName of categories) {
+      const { data: existing } = await sb.from('tags').select('id').eq('name', catName).eq('type', 'purpose').limit(1)
+      if (existing && existing.length > 0) continue
+      const { error } = await sb.from('tags').insert({
+        name: catName,
+        type: 'purpose',
+        parent_id: parentId,
+        is_active: true,
+      })
+      if (!error) catCount++
+      else results.push(`Error creating cat "${catName}": ${error.message}`)
+    }
+  }
+
+  // Unassigned categories (no parent area)
+  for (const catName of NOTION_UNASSIGNED_CATEGORIES) {
+    const { data: existing } = await sb.from('tags').select('id').eq('name', catName).eq('type', 'purpose').limit(1)
+    if (existing && existing.length > 0) continue
+    const { error } = await sb.from('tags').insert({ name: catName, type: 'purpose', is_active: true })
+    if (!error) catCount++
+  }
+  results.push(`Created ${catCount} categories`)
+
+  // 4. Create Activity tags (type = 'scope')
+  let actCount = 0
+  for (const act of NOTION_ACTIVITIES) {
+    const { data: existing } = await sb.from('tags').select('id').eq('name', act.name).eq('type', 'scope').limit(1)
+    if (existing && existing.length > 0) continue
+    const { error } = await sb.from('tags').insert({
+      name: act.name,
+      type: 'scope',
+      is_active: true,
+    })
+    if (!error) actCount++
+  }
+  results.push(`Created ${actCount} activities (scope tags)`)
+
+  // 5. Delete existing counterparties that are NOT linked to any transaction
+  const { data: usedCpIds } = await sb.from('transactions').select('counterparty_id').not('counterparty_id', 'is', null)
+  const usedCpSet = new Set((usedCpIds || []).map((r: { counterparty_id: string }) => r.counterparty_id))
+  const { data: existingCps } = await sb.from('counterparties').select('id, name')
+  const cpsToDelete = (existingCps || []).filter((c: { id: string }) => !usedCpSet.has(c.id))
+  if (cpsToDelete.length > 0) {
+    await sb.from('counterparties').delete().in('id', cpsToDelete.map((c: { id: string }) => c.id))
+    results.push(`Deleted ${cpsToDelete.length} unused counterparties`)
+  }
+
+  // 6. Create counterparties from Notion data
+  let cpCount = 0
+  for (const name of NOTION_COUNTERPARTIES) {
+    const { data: existing } = await sb.from('counterparties').select('id').eq('name', name).limit(1)
+    if (existing && existing.length > 0) continue
+    const { error } = await sb.from('counterparties').insert({ name, is_active: true })
+    if (!error) cpCount++
+  }
+  results.push(`Created ${cpCount} counterparties`)
+
+  return ok(res, { message: 'Seed completed', results })
+}
+
+// ============================================================
+// INSTALLMENT PLANS
+// ============================================================
+
+async function handleInstallmentPlans(
+  req: VercelRequest,
+  res: VercelResponse,
+  id: string | null,
+) {
+  const sb = getSupabase()
+  const method = req.method
+
+  if (method === 'GET' && !id) {
+    const { data, error } = await sb
+      .from('installment_plans')
+      .select('*, installments(*), counterparties(name), containers(name)')
+      .order('created_at', { ascending: false })
+    if (error) throw error
+    return ok(res, data)
+  }
+
+  if (method === 'GET' && id) {
+    const { data, error } = await sb
+      .from('installment_plans')
+      .select('*, installments(*), counterparties(name), containers(name)')
+      .eq('id', id)
+      .single()
+    if (error || !data) return notFound(res, 'Piano rateale non trovato')
+    return ok(res, data)
+  }
+
+  const bodyAction = (req.body as Record<string, unknown>)?._action
+
+  if (method === 'POST' && bodyAction === 'update') {
+    const b = req.body || {}
+    const planId = b.id as string
+    if (!planId) return badRequest(res, 'id e obbligatorio')
+    const update: Record<string, unknown> = { updated_at: new Date().toISOString() }
+    if (b.description !== undefined) update.description = b.description
+    if (b.totalAmount !== undefined) update.total_amount = b.totalAmount
+    if (b.currency !== undefined) update.currency = b.currency
+    if (b.numberOfInstallments !== undefined) update.number_of_installments = b.numberOfInstallments
+    if (b.counterpartyId !== undefined) update.counterparty_id = b.counterpartyId
+    if (b.containerId !== undefined) update.container_id = b.containerId
+    if (b.reminderDaysBefore !== undefined) update.reminder_days_before = b.reminderDaysBefore
+    if (b.notes !== undefined) update.notes = b.notes
+    if (b.isActive !== undefined) update.is_active = b.isActive
+
+    const { data, error } = await sb.from('installment_plans').update(update).eq('id', planId).select().single()
+    if (error || !data) return notFound(res, 'Piano rateale non trovato')
+    return ok(res, data)
+  }
+
+  if (method === 'POST' && bodyAction === 'delete') {
+    const planId = (req.body as Record<string, unknown>)?.id as string
+    if (!planId) return badRequest(res, 'id e obbligatorio')
+    // Delete installments first, then the plan
+    await sb.from('installments').delete().eq('plan_id', planId)
+    const { data, error } = await sb.from('installment_plans').delete().eq('id', planId).select('id').single()
+    if (error || !data) return notFound(res, 'Piano rateale non trovato')
+    return ok(res, { deleted: true, id: planId })
+  }
+
+  if (method === 'POST' && bodyAction === 'pay-installment') {
+    const installmentId = (req.body as Record<string, unknown>)?.installmentId as string
+    const transactionId = (req.body as Record<string, unknown>)?.transactionId as string | undefined
+    if (!installmentId) return badRequest(res, 'installmentId e obbligatorio')
+    const update: Record<string, unknown> = {
+      status: 'paid',
+      updated_at: new Date().toISOString(),
+    }
+    if (transactionId) update.transaction_id = transactionId
+    const { data, error } = await sb.from('installments').update(update).eq('id', installmentId).select().single()
+    if (error || !data) return notFound(res, 'Rata non trovata')
+    return ok(res, data)
+  }
+
+  if (method === 'POST') {
+    const b = req.body || {}
+    if (!b.description || !b.totalAmount || !b.numberOfInstallments)
+      return badRequest(res, 'description, totalAmount e numberOfInstallments sono obbligatori')
+
+    const { data: plan, error: planError } = await sb
+      .from('installment_plans')
+      .insert({
+        description: b.description,
+        total_amount: b.totalAmount,
+        currency: b.currency ?? 'EUR',
+        number_of_installments: b.numberOfInstallments,
+        counterparty_id: b.counterpartyId ?? null,
+        container_id: b.containerId ?? null,
+        reminder_days_before: b.reminderDaysBefore ?? null,
+        notes: b.notes ?? null,
+        is_active: b.isActive ?? true,
+      })
+      .select()
+      .single()
+    if (planError || !plan) throw planError
+
+    // Auto-generate installments if startDate provided
+    if (b.startDate && b.numberOfInstallments) {
+      const numInst = parseInt(b.numberOfInstallments as string, 10)
+      const instAmount = (parseFloat(b.totalAmount as string) / numInst).toFixed(2)
+      const installments = []
+      for (let i = 0; i < numInst; i++) {
+        const dueDate = new Date(b.startDate as string)
+        dueDate.setMonth(dueDate.getMonth() + i)
+        installments.push({
+          plan_id: plan.id,
+          installment_number: i + 1,
+          amount: instAmount,
+          due_date: dueDate.toISOString().split('T')[0],
+          status: 'pending',
+        })
+      }
+      await sb.from('installments').insert(installments)
+    }
+
+    // Re-fetch with joins
+    const { data: full } = await sb
+      .from('installment_plans')
+      .select('*, installments(*), counterparties(name), containers(name)')
+      .eq('id', plan.id)
+      .single()
+
+    return created(res, full || plan)
+  }
+
+  return badRequest(res, `Metodo ${method} non supportato per installment-plans`)
+}
+
+// ============================================================
+// IMPORT PROFILES
+// ============================================================
+
+async function handleImportProfiles(
+  req: VercelRequest,
+  res: VercelResponse,
+  id: string | null,
+) {
+  const sb = getSupabase()
+  const method = req.method
+
+  if (method === 'GET' && !id) {
+    const { data, error } = await sb
+      .from('import_profiles')
+      .select('*, containers(name)')
+      .order('name')
+    if (error) throw error
+    return ok(res, data)
+  }
+
+  if (method === 'GET' && id) {
+    const { data, error } = await sb
+      .from('import_profiles')
+      .select('*, containers(name)')
+      .eq('id', id)
+      .single()
+    if (error || !data) return notFound(res, 'Profilo di import non trovato')
+    return ok(res, data)
+  }
+
+  const bodyAction = (req.body as Record<string, unknown>)?._action
+
+  if (method === 'POST' && bodyAction === 'update') {
+    const b = req.body || {}
+    const profileId = b.id as string
+    if (!profileId) return badRequest(res, 'id e obbligatorio')
+    const update: Record<string, unknown> = { updated_at: new Date().toISOString() }
+    if (b.name !== undefined) update.name = b.name
+    if (b.containerId !== undefined) update.container_id = b.containerId
+    if (b.fileType !== undefined) update.file_type = b.fileType
+    if (b.delimiter !== undefined) update.delimiter = b.delimiter
+    if (b.encoding !== undefined) update.encoding = b.encoding
+    if (b.dateFormat !== undefined) update.date_format = b.dateFormat
+    if (b.decimalSeparator !== undefined) update.decimal_separator = b.decimalSeparator
+    if (b.thousandsSeparator !== undefined) update.thousands_separator = b.thousandsSeparator
+    if (b.skipRows !== undefined) update.skip_rows = b.skipRows
+    if (b.columnMapping !== undefined) update.column_mapping = b.columnMapping
+    if (b.amountInverted !== undefined) update.amount_inverted = b.amountInverted
+    if (b.separateAmountColumns !== undefined) update.separate_amount_columns = b.separateAmountColumns
+    if (b.incomeColumn !== undefined) update.income_column = b.incomeColumn
+    if (b.expenseColumn !== undefined) update.expense_column = b.expenseColumn
+    if (b.notes !== undefined) update.notes = b.notes
+
+    const { data, error } = await sb.from('import_profiles').update(update).eq('id', profileId).select().single()
+    if (error || !data) return notFound(res, 'Profilo di import non trovato')
+    return ok(res, data)
+  }
+
+  if (method === 'POST' && bodyAction === 'delete') {
+    const profileId = (req.body as Record<string, unknown>)?.id as string
+    if (!profileId) return badRequest(res, 'id e obbligatorio')
+    const { data, error } = await sb.from('import_profiles').delete().eq('id', profileId).select('id').single()
+    if (error || !data) return notFound(res, 'Profilo di import non trovato')
+    return ok(res, { deleted: true, id: profileId })
+  }
+
+  if (method === 'POST') {
+    const b = req.body || {}
+    if (!b.name || !b.containerId) return badRequest(res, 'name e containerId sono obbligatori')
+
+    const { data, error } = await sb
+      .from('import_profiles')
+      .insert({
+        name: b.name,
+        container_id: b.containerId,
+        file_type: b.fileType ?? 'csv',
+        delimiter: b.delimiter ?? ',',
+        encoding: b.encoding ?? 'UTF-8',
+        date_format: b.dateFormat ?? 'DD/MM/YYYY',
+        decimal_separator: b.decimalSeparator ?? ',',
+        thousands_separator: b.thousandsSeparator ?? '.',
+        skip_rows: b.skipRows ?? 0,
+        column_mapping: b.columnMapping ?? {},
+        amount_inverted: b.amountInverted ?? false,
+        separate_amount_columns: b.separateAmountColumns ?? false,
+        income_column: b.incomeColumn ?? null,
+        expense_column: b.expenseColumn ?? null,
+        notes: b.notes ?? null,
+      })
+      .select('*, containers(name)')
+      .single()
+    if (error) throw error
+    return created(res, data)
+  }
+
+  return badRequest(res, `Metodo ${method} non supportato per import-profiles`)
+}
+
+// ============================================================
 // MAIN ROUTER
 // ============================================================
 
@@ -2631,14 +3155,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return await handleBudget(req, res, segments)
       case 'smart-rules':
         return await handleSmartRules(req, res, segments[1] || null)
+      case 'installment-plans':
+        return await handleInstallmentPlans(req, res, segments[1] || null)
+      case 'import-profiles':
+        return await handleImportProfiles(req, res, segments[1] || null)
       case 'stats':
         return await handleStats(req, res, segments)
+      case 'seed':
+        return await handleSeed(req, res)
       case 'health':
         return res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() })
       case '':
         return res.status(200).json({
           status: 'ok',
-          endpoints: ['subjects', 'containers', 'counterparties', 'tags', 'transactions', 'recurrences', 'budget', 'stats', 'health'],
+          endpoints: ['subjects', 'containers', 'counterparties', 'tags', 'transactions', 'recurrences', 'budget', 'installment-plans', 'import-profiles', 'stats', 'health'],
         })
       default:
         return res.status(404).json({ error: 'Not Found', message: `Nessun handler per: /${segments.join('/')}` })

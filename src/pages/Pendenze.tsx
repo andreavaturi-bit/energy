@@ -7,76 +7,67 @@ import {
   AlertCircle,
   CalendarClock,
   Plus,
-  X,
   Trash2,
-  MoreHorizontal,
+  Loader2,
+  FileText,
 } from 'lucide-react'
-import { useContainers } from '@/lib/hooks'
+import {
+  useContainers,
+  useTransactions,
+  useUpdateTransaction,
+  useCreateTransaction,
+  useDeleteTransaction,
+  useInstallmentPlans,
+  useCounterparties,
+} from '@/lib/hooks'
 import { formatCurrency } from '@/lib/utils'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { Modal } from '@/components/ui/Modal'
+import type { Transaction, TransactionType, InstallmentPlan, Installment } from '@/types'
 
-interface PendingItem {
-  id: string
-  description: string
-  counterpartyId?: string
-  counterpartyName: string
-  amount: number
-  dueDate: string
-  direction: 'credit' | 'debit'
-  status: 'pending' | 'resolved'
-  containerId: string
-  notes?: string
-}
-
-interface InstallmentPlanItem {
-  id: string
-  description: string
-  counterpartyName: string
-  totalAmount: number
-  installments: number
-  paid: number
-  nextDue: string
-  nextAmount: number
-  containerId: string
-  isActive: boolean
-}
-
-// Realistic pending items based on Andrea's finances
-const initialPending: PendingItem[] = [
-  { id: 'p-1', description: 'Quota 50% Mirko - corso Opzionetika febbraio', counterpartyName: 'Mirko Castignani', amount: 2100, dueDate: '2026-02-28', direction: 'credit', status: 'pending', containerId: 'c-isp-kairos', notes: 'Incasso corso VS/Opzionetika da dividere' },
-  { id: 'p-2', description: 'Fattura consulenza broker Q1', counterpartyName: 'Cliente XYZ', amount: 1500, dueDate: '2026-03-15', direction: 'credit', status: 'pending', containerId: 'c-isp-kairos', notes: 'Fattura emessa il 18/02' },
-  { id: 'p-3', description: 'Rimborso spese viaggio Roma', counterpartyName: 'Kairos SRLS', amount: 450, dueDate: '2026-02-20', direction: 'credit', status: 'pending', containerId: 'c-isp' },
-  { id: 'p-4', description: 'Saldo Amex Oro - AV (estratto gennaio)', counterpartyName: 'American Express', amount: 2340, dueDate: '2026-02-10', direction: 'debit', status: 'pending', containerId: 'c-isp', notes: 'Addebito su ISP 2767' },
-  { id: 'p-5', description: 'Saldo Amex Oro - VS (estratto gennaio)', counterpartyName: 'American Express', amount: 890, dueDate: '2026-02-10', direction: 'debit', status: 'pending', containerId: 'c-isp', notes: 'Addebito su ISP 2767' },
-  { id: 'p-6', description: 'F24 IVA 4Q 2025 - Kairos', counterpartyId: 'cp-ade', counterpartyName: 'Agenzia delle Entrate', amount: 3200, dueDate: '2026-03-16', direction: 'debit', status: 'pending', containerId: 'c-isp-kairos', notes: 'Scadenza fiscale' },
-  { id: 'p-7', description: 'TARI 2026 - rata 1', counterpartyName: 'Comune di Milano', amount: 180, dueDate: '2026-04-30', direction: 'debit', status: 'pending', containerId: 'c-isp' },
-  { id: 'p-8', description: 'Commercialista personale - dichiarazione redditi', counterpartyName: 'Studio Rossi', amount: 300, dueDate: '2026-06-30', direction: 'debit', status: 'pending', containerId: 'c-isp' },
-]
-
-const initialPlans: InstallmentPlanItem[] = [
-  { id: 'ip-1', description: 'Multa autostradale - rateizzata', counterpartyName: 'Autostrade per l\'Italia', totalAmount: 480, installments: 4, paid: 1, nextDue: '2026-03-15', nextAmount: 120, containerId: 'c-isp', isActive: true },
-  { id: 'ip-2', description: 'Assicurazione auto - 4 rate', counterpartyName: 'Zurich Assicurazioni', totalAmount: 1200, installments: 4, paid: 2, nextDue: '2026-04-01', nextAmount: 300, containerId: 'c-isp', isActive: true },
-]
+const INCOME_TYPES = ['income', 'transfer_in', 'loan_in', 'repayment_in'] as const
+const EXPENSE_TYPES = ['expense', 'transfer_out', 'capital_injection', 'loan_out', 'repayment_out'] as const
 
 export function Pendenze() {
   const { data: containers = [] } = useContainers()
-  const [pending, setPending] = useState<PendingItem[]>(initialPending)
-  const [plans, setPlans] = useState<InstallmentPlanItem[]>(initialPlans)
+  const { data: counterparties = [] } = useCounterparties()
+  const { data: pendingData, isLoading: pendingLoading } = useTransactions({ status: 'pending', limit: '200' })
+  const { data: plans = [], isLoading: plansLoading } = useInstallmentPlans()
+  const updateTransaction = useUpdateTransaction()
+  const createTransaction = useCreateTransaction()
+  const deleteTransaction = useDeleteTransaction()
+
   const [showModal, setShowModal] = useState(false)
   const [modalType, setModalType] = useState<'credit' | 'debit'>('credit')
 
-  const credits = pending.filter((p) => p.direction === 'credit' && p.status === 'pending')
-  const debits = pending.filter((p) => p.direction === 'debit' && p.status === 'pending')
-  const totalCredits = credits.reduce((s, p) => s + p.amount, 0)
-  const totalDebits = debits.reduce((s, p) => s + p.amount, 0)
+  const pendingTransactions = pendingData?.rows ?? []
+
+  const credits = useMemo(
+    () => pendingTransactions.filter((t) => (INCOME_TYPES as readonly string[]).includes(t.type)),
+    [pendingTransactions],
+  )
+  const debits = useMemo(
+    () => pendingTransactions.filter((t) => (EXPENSE_TYPES as readonly string[]).includes(t.type)),
+    [pendingTransactions],
+  )
+
+  const totalCredits = credits.reduce((s, t) => s + Math.abs(parseFloat(t.amount)), 0)
+  const totalDebits = debits.reduce((s, t) => s + Math.abs(parseFloat(t.amount)), 0)
+
+  const activePlans = plans.filter((p) => p.isActive)
+  const plansRemaining = activePlans.reduce((sum, p) => {
+    const paidCount = p.installments?.filter((i) => i.status === 'paid').length ?? 0
+    const instAmount = parseFloat(p.totalAmount) / p.numberOfInstallments
+    return sum + instAmount * (p.numberOfInstallments - paidCount)
+  }, 0)
 
   function resolveItem(id: string) {
-    setPending((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, status: 'resolved' as const } : p)),
-    )
+    updateTransaction.mutate({ id, data: { status: 'completed' } })
   }
 
-  function deleteItem(id: string) {
-    setPending((prev) => prev.filter((p) => p.id !== id))
+  function removeItem(id: string) {
+    if (!confirm('Eliminare questa pendenza?')) return
+    deleteTransaction.mutate(id)
   }
 
   function openAdd(type: 'credit' | 'debit') {
@@ -84,12 +75,12 @@ export function Pendenze() {
     setShowModal(true)
   }
 
-  function isOverdue(dueDate: string): boolean {
-    return new Date(dueDate) < new Date()
+  function isOverdue(dateStr: string): boolean {
+    return new Date(dateStr) < new Date()
   }
 
-  function isUrgent(dueDate: string): boolean {
-    const diff = (new Date(dueDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+  function isUrgent(dateStr: string): boolean {
+    const diff = (new Date(dateStr).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
     return diff <= 7 && diff >= 0
   }
 
@@ -107,6 +98,25 @@ export function Pendenze() {
     if (diff === 0) return 'Oggi'
     if (diff === 1) return 'Domani'
     return `tra ${diff} giorni`
+  }
+
+  function getContainerName(containerId: string): string {
+    return containers.find((c) => c.id === containerId)?.name ?? ''
+  }
+
+  function getCounterpartyName(counterpartyId?: string | null): string {
+    if (!counterpartyId) return ''
+    return counterparties.find((c) => c.id === counterpartyId)?.name ?? ''
+  }
+
+  const isLoading = pendingLoading || plansLoading
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="h-8 w-8 animate-spin text-energy-400" />
+      </div>
+    )
   }
 
   return (
@@ -151,178 +161,50 @@ export function Pendenze() {
             <CalendarClock className="h-4 w-4 text-purple-400" />
             <p className="text-xs text-zinc-500">Piani Rateali Attivi</p>
           </div>
-          <p className="mt-1 text-2xl font-bold text-zinc-100">{plans.filter((p) => p.isActive).length}</p>
+          <p className="mt-1 text-2xl font-bold text-zinc-100">{activePlans.length}</p>
           <p className="text-xs text-zinc-500">
-            {formatCurrency(plans.reduce((s, p) => s + (p.totalAmount - p.nextAmount * (p.installments - p.paid)), 0))} rimanente
+            {formatCurrency(plansRemaining)} rimanente
           </p>
         </div>
       </div>
 
       {/* Crediti section */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-emerald-900/50 bg-emerald-500/5">
-          <div className="flex items-center gap-2">
-            <ArrowUpCircle className="h-5 w-5 text-emerald-400" />
-            <h2 className="text-lg font-semibold text-emerald-400">Crediti</h2>
-            <span className="ml-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-400">
-              {credits.length}
-            </span>
-          </div>
-          <button
-            className="flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300"
-            onClick={() => openAdd('credit')}
-          >
-            <Plus className="h-3 w-3" />
-            Aggiungi
-          </button>
-        </div>
-        <div className="divide-y divide-zinc-800/50">
-          {credits.length === 0 ? (
-            <div className="py-8 text-center text-sm text-zinc-500">Nessun credito pendente</div>
-          ) : (
-            credits
-              .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
-              .map((item) => (
-                <div key={item.id} className="flex items-center gap-4 px-6 py-4 hover:bg-zinc-800/30 transition-colors">
-                  <div className="shrink-0">
-                    {isOverdue(item.dueDate) ? (
-                      <AlertCircle className="h-4 w-4 text-red-400" />
-                    ) : isUrgent(item.dueDate) ? (
-                      <AlertCircle className="h-4 w-4 text-amber-400" />
-                    ) : (
-                      <Clock className="h-4 w-4 text-emerald-400" />
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-zinc-200">{item.description}</p>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-xs text-zinc-500">{item.counterpartyName}</span>
-                      <span className="text-xs text-zinc-600">|</span>
-                      <span className="text-xs text-zinc-500">{containers.find((c) => c.id === item.containerId)?.name || ''}</span>
-                      {item.notes && (
-                        <>
-                          <span className="text-xs text-zinc-600">—</span>
-                          <span className="text-xs text-zinc-500">{item.notes}</span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  <div className="shrink-0 text-right">
-                    <p className="text-xs text-zinc-500">Scadenza</p>
-                    <p className={`text-sm ${isOverdue(item.dueDate) ? 'text-red-400' : 'text-zinc-300'}`}>
-                      {formatDate(item.dueDate)}
-                    </p>
-                    <p className={`text-xs ${isOverdue(item.dueDate) ? 'text-red-400' : isUrgent(item.dueDate) ? 'text-amber-400' : 'text-zinc-500'}`}>
-                      {daysUntil(item.dueDate)}
-                    </p>
-                  </div>
-                  <p className="shrink-0 text-sm font-semibold text-emerald-400 min-w-[100px] text-right">
-                    {formatCurrency(item.amount)}
-                  </p>
-                  <div className="shrink-0 flex items-center gap-1">
-                    <button
-                      className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-emerald-400"
-                      title="Segna come incassato"
-                      onClick={() => resolveItem(item.id)}
-                    >
-                      <CheckCircle2 className="h-4 w-4" />
-                    </button>
-                    <button
-                      className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-red-400"
-                      title="Elimina"
-                      onClick={() => deleteItem(item.id)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-              ))
-          )}
-        </div>
-      </div>
+      <PendingSection
+        title="Crediti"
+        items={credits}
+        color="emerald"
+        icon={ArrowUpCircle}
+        emptyText="Nessun credito pendente"
+        actionLabel="Incassato"
+        onAdd={() => openAdd('credit')}
+        onResolve={resolveItem}
+        onDelete={removeItem}
+        getContainerName={getContainerName}
+        getCounterpartyName={getCounterpartyName}
+        isOverdue={isOverdue}
+        isUrgent={isUrgent}
+        formatDate={formatDate}
+        daysUntil={daysUntil}
+      />
 
       {/* Debiti section */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-red-900/50 bg-red-500/5">
-          <div className="flex items-center gap-2">
-            <ArrowDownCircle className="h-5 w-5 text-red-400" />
-            <h2 className="text-lg font-semibold text-red-400">Debiti</h2>
-            <span className="ml-1 rounded-full bg-red-500/10 px-2 py-0.5 text-xs text-red-400">
-              {debits.length}
-            </span>
-          </div>
-          <button
-            className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300"
-            onClick={() => openAdd('debit')}
-          >
-            <Plus className="h-3 w-3" />
-            Aggiungi
-          </button>
-        </div>
-        <div className="divide-y divide-zinc-800/50">
-          {debits.length === 0 ? (
-            <div className="py-8 text-center text-sm text-zinc-500">Nessun debito pendente</div>
-          ) : (
-            debits
-              .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
-              .map((item) => (
-                <div key={item.id} className="flex items-center gap-4 px-6 py-4 hover:bg-zinc-800/30 transition-colors">
-                  <div className="shrink-0">
-                    {isOverdue(item.dueDate) ? (
-                      <AlertCircle className="h-4 w-4 text-red-400 animate-pulse" />
-                    ) : isUrgent(item.dueDate) ? (
-                      <AlertCircle className="h-4 w-4 text-amber-400" />
-                    ) : (
-                      <Clock className="h-4 w-4 text-red-300" />
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-zinc-200">{item.description}</p>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-xs text-zinc-500">{item.counterpartyName}</span>
-                      <span className="text-xs text-zinc-600">|</span>
-                      <span className="text-xs text-zinc-500">{containers.find((c) => c.id === item.containerId)?.name || ''}</span>
-                      {item.notes && (
-                        <>
-                          <span className="text-xs text-zinc-600">—</span>
-                          <span className="text-xs text-zinc-500">{item.notes}</span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  <div className="shrink-0 text-right">
-                    <p className="text-xs text-zinc-500">Scadenza</p>
-                    <p className={`text-sm ${isOverdue(item.dueDate) ? 'text-red-400 font-semibold' : 'text-zinc-300'}`}>
-                      {formatDate(item.dueDate)}
-                    </p>
-                    <p className={`text-xs ${isOverdue(item.dueDate) ? 'text-red-400' : isUrgent(item.dueDate) ? 'text-amber-400' : 'text-zinc-500'}`}>
-                      {daysUntil(item.dueDate)}
-                    </p>
-                  </div>
-                  <p className="shrink-0 text-sm font-semibold text-red-400 min-w-[100px] text-right">
-                    {formatCurrency(item.amount)}
-                  </p>
-                  <div className="shrink-0 flex items-center gap-1">
-                    <button
-                      className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-emerald-400"
-                      title="Segna come pagato"
-                      onClick={() => resolveItem(item.id)}
-                    >
-                      <CheckCircle2 className="h-4 w-4" />
-                    </button>
-                    <button
-                      className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-red-400"
-                      title="Elimina"
-                      onClick={() => deleteItem(item.id)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-              ))
-          )}
-        </div>
-      </div>
+      <PendingSection
+        title="Debiti"
+        items={debits}
+        color="red"
+        icon={ArrowDownCircle}
+        emptyText="Nessun debito pendente"
+        actionLabel="Pagato"
+        onAdd={() => openAdd('debit')}
+        onResolve={resolveItem}
+        onDelete={removeItem}
+        getContainerName={getContainerName}
+        getCounterpartyName={getCounterpartyName}
+        isOverdue={isOverdue}
+        isUrgent={isUrgent}
+        formatDate={formatDate}
+        daysUntil={daysUntil}
+      />
 
       {/* Piani rateali */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
@@ -331,61 +213,30 @@ export function Pendenze() {
             <CalendarClock className="h-5 w-5 text-amber-400" />
             <h2 className="text-lg font-semibold text-zinc-100">Piani Rateali</h2>
             <span className="ml-1 rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-400">
-              {plans.filter((p) => p.isActive).length}
+              {activePlans.length}
             </span>
           </div>
-          <button className="flex items-center gap-1 text-xs text-energy-400 hover:text-energy-300">
-            <Plus className="h-3 w-3" />
-            Nuovo Piano
-          </button>
         </div>
-        <div className="divide-y divide-zinc-800/50">
-          {plans.map((plan) => {
-            const remaining = plan.totalAmount - (plan.nextAmount * plan.paid)
-            const progress = (plan.paid / plan.installments) * 100
-
-            return (
-              <div key={plan.id} className="px-6 py-4 hover:bg-zinc-800/30 transition-colors">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-zinc-200">{plan.description}</p>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-xs text-zinc-500">{plan.counterpartyName}</span>
-                      <span className="text-xs text-zinc-600">|</span>
-                      <span className="text-xs text-zinc-500">{containers.find((c) => c.id === plan.containerId)?.name || ''}</span>
-                    </div>
-                  </div>
-                  <p className="text-sm font-semibold text-zinc-100">{formatCurrency(plan.totalAmount)}</p>
-                </div>
-                <div className="mt-3">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-xs text-zinc-500">
-                      Rata {plan.paid} di {plan.installments} pagate
-                    </span>
-                    <span className="text-xs text-zinc-400">
-                      Rimanente: {formatCurrency(remaining)}
-                    </span>
-                  </div>
-                  <div className="h-2 rounded-full bg-zinc-800">
-                    <div
-                      className="h-2 rounded-full bg-energy-500 transition-all"
-                      style={{ width: `${progress}%` }}
-                    />
-                  </div>
-                </div>
-                <div className="mt-2 flex items-center justify-between">
-                  <span className="text-xs text-zinc-500">
-                    Prossima rata: <span className="text-zinc-300">{formatDate(plan.nextDue)}</span>
-                    <span className={`ml-1 ${isUrgent(plan.nextDue) ? 'text-amber-400' : 'text-zinc-500'}`}>
-                      ({daysUntil(plan.nextDue)})
-                    </span>
-                  </span>
-                  <span className="text-xs font-medium text-amber-400">{formatCurrency(plan.nextAmount)}</span>
-                </div>
-              </div>
-            )
-          })}
-        </div>
+        {activePlans.length === 0 ? (
+          <EmptyState
+            icon={FileText}
+            title="Nessun piano rateale"
+            description="I piani rateali appariranno qui quando ne creerai uno"
+          />
+        ) : (
+          <div className="divide-y divide-zinc-800/50">
+            {activePlans.map((plan) => (
+              <InstallmentPlanRow
+                key={plan.id}
+                plan={plan}
+                getContainerName={getContainerName}
+                formatDate={formatDate}
+                isUrgent={isUrgent}
+                daysUntil={daysUntil}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Add pending item modal */}
@@ -395,7 +246,16 @@ export function Pendenze() {
           containers={containers}
           onClose={() => setShowModal(false)}
           onSave={(item) => {
-            setPending((prev) => [...prev, { ...item, id: `p-${Date.now()}`, status: 'pending' }])
+            createTransaction.mutate({
+              description: item.description,
+              amount: String(item.amount),
+              date: item.dueDate,
+              containerId: item.containerId,
+              type: item.type,
+              status: 'pending',
+              source: 'manual',
+              notes: item.notes,
+            })
             setShowModal(false)
           }}
         />
@@ -403,6 +263,220 @@ export function Pendenze() {
     </div>
   )
 }
+
+// ── Pending Section (reusable for credits & debits) ────────
+
+function PendingSection({
+  title,
+  items,
+  color,
+  icon: Icon,
+  emptyText,
+  actionLabel,
+  onAdd,
+  onResolve,
+  onDelete,
+  getContainerName,
+  getCounterpartyName,
+  isOverdue,
+  isUrgent,
+  formatDate,
+  daysUntil,
+}: {
+  title: string
+  items: Transaction[]
+  color: 'emerald' | 'red'
+  icon: typeof ArrowUpCircle
+  emptyText: string
+  actionLabel: string
+  onAdd: () => void
+  onResolve: (id: string) => void
+  onDelete: (id: string) => void
+  getContainerName: (id: string) => string
+  getCounterpartyName: (id?: string | null) => string
+  isOverdue: (d: string) => boolean
+  isUrgent: (d: string) => boolean
+  formatDate: (d: string) => string
+  daysUntil: (d: string) => string
+}) {
+  const borderColor = color === 'emerald' ? 'border-emerald-900/50' : 'border-red-900/50'
+  const bgColor = color === 'emerald' ? 'bg-emerald-500/5' : 'bg-red-500/5'
+  const textColor = color === 'emerald' ? 'text-emerald-400' : 'text-red-400'
+  const badgeBg = color === 'emerald' ? 'bg-emerald-500/10' : 'bg-red-500/10'
+
+  const sorted = [...items].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+
+  return (
+    <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+      <div className={`flex items-center justify-between px-6 py-4 border-b ${borderColor} ${bgColor}`}>
+        <div className="flex items-center gap-2">
+          <Icon className={`h-5 w-5 ${textColor}`} />
+          <h2 className={`text-lg font-semibold ${textColor}`}>{title}</h2>
+          <span className={`ml-1 rounded-full ${badgeBg} px-2 py-0.5 text-xs ${textColor}`}>
+            {items.length}
+          </span>
+        </div>
+        <button
+          className={`flex items-center gap-1 text-xs ${textColor} hover:opacity-80`}
+          onClick={onAdd}
+        >
+          <Plus className="h-3 w-3" />
+          Aggiungi
+        </button>
+      </div>
+      <div className="divide-y divide-zinc-800/50">
+        {sorted.length === 0 ? (
+          <div className="py-8 text-center text-sm text-zinc-500">{emptyText}</div>
+        ) : (
+          sorted.map((item) => {
+            const cpName = getCounterpartyName(item.counterpartyId)
+            return (
+              <div key={item.id} className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 px-4 sm:px-6 py-4 hover:bg-zinc-800/30 transition-colors">
+                <div className="flex items-start gap-3 sm:items-center sm:contents">
+                  <div className="shrink-0 mt-0.5 sm:mt-0">
+                    {isOverdue(item.date) ? (
+                      <AlertCircle className="h-4 w-4 text-red-400" />
+                    ) : isUrgent(item.date) ? (
+                      <AlertCircle className="h-4 w-4 text-amber-400" />
+                    ) : (
+                      <Clock className={`h-4 w-4 ${textColor}`} />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-zinc-200">{item.description || 'Senza descrizione'}</p>
+                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                      {cpName && <span className="text-xs text-zinc-500">{cpName}</span>}
+                      {cpName && <span className="text-xs text-zinc-600">|</span>}
+                      <span className="text-xs text-zinc-500">{getContainerName(item.containerId)}</span>
+                      {item.notes && (
+                        <>
+                          <span className="text-xs text-zinc-600">-</span>
+                          <span className="text-xs text-zinc-500">{item.notes}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between sm:contents ml-7 sm:ml-0">
+                  <div className="shrink-0 text-left sm:text-right">
+                    <p className="text-xs text-zinc-500">Scadenza</p>
+                    <p className={`text-sm ${isOverdue(item.date) ? 'text-red-400' : 'text-zinc-300'}`}>
+                      {formatDate(item.date)}
+                    </p>
+                    <p className={`text-xs ${isOverdue(item.date) ? 'text-red-400' : isUrgent(item.date) ? 'text-amber-400' : 'text-zinc-500'}`}>
+                      {daysUntil(item.date)}
+                    </p>
+                  </div>
+                  <p className={`shrink-0 text-sm font-semibold ${textColor} min-w-[80px] sm:min-w-[100px] text-right`}>
+                    {formatCurrency(Math.abs(parseFloat(item.amount)))}
+                  </p>
+                  <div className="shrink-0 flex items-center gap-1">
+                    <button
+                      className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-emerald-400"
+                      title={`Segna come ${actionLabel.toLowerCase()}`}
+                      onClick={() => onResolve(item.id)}
+                    >
+                      <CheckCircle2 className="h-4 w-4" />
+                    </button>
+                    <button
+                      className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-red-400"
+                      title="Elimina"
+                      onClick={() => onDelete(item.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )
+          })
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Installment Plan Row ───────────────────────────────────
+
+function InstallmentPlanRow({
+  plan,
+  getContainerName,
+  formatDate,
+  isUrgent,
+  daysUntil,
+}: {
+  plan: InstallmentPlan
+  getContainerName: (id: string) => string
+  formatDate: (d: string) => string
+  isUrgent: (d: string) => boolean
+  daysUntil: (d: string) => string
+}) {
+  const paidCount = plan.installments?.filter((i) => i.status === 'paid').length ?? 0
+  const progress = plan.numberOfInstallments > 0 ? (paidCount / plan.numberOfInstallments) * 100 : 0
+  const instAmount = plan.numberOfInstallments > 0
+    ? parseFloat(plan.totalAmount) / plan.numberOfInstallments
+    : 0
+  const remaining = instAmount * (plan.numberOfInstallments - paidCount)
+
+  const nextInstallment = plan.installments
+    ?.filter((i) => i.status === 'pending')
+    .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())[0]
+
+  // The API joins counterparties(name) which arrives as a nested object
+  const planAny = plan as unknown as Record<string, unknown>
+  const counterpartyName = planAny.counterparties
+    ? (planAny.counterparties as { name: string })?.name
+    : plan.counterparty?.name ?? ''
+
+  return (
+    <div className="px-6 py-4 hover:bg-zinc-800/30 transition-colors">
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-sm font-medium text-zinc-200">{plan.description}</p>
+          <div className="flex items-center gap-2 mt-0.5">
+            {counterpartyName && <span className="text-xs text-zinc-500">{counterpartyName}</span>}
+            {counterpartyName && plan.containerId && <span className="text-xs text-zinc-600">|</span>}
+            {plan.containerId && (
+              <span className="text-xs text-zinc-500">{getContainerName(plan.containerId)}</span>
+            )}
+          </div>
+        </div>
+        <p className="text-sm font-semibold text-zinc-100">{formatCurrency(plan.totalAmount)}</p>
+      </div>
+      <div className="mt-3">
+        <div className="flex items-center justify-between mb-1.5">
+          <span className="text-xs text-zinc-500">
+            Rata {paidCount} di {plan.numberOfInstallments} pagate
+          </span>
+          <span className="text-xs text-zinc-400">
+            Rimanente: {formatCurrency(remaining)}
+          </span>
+        </div>
+        <div className="h-2 rounded-full bg-zinc-800">
+          <div
+            className="h-2 rounded-full bg-energy-500 transition-all"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+      </div>
+      {nextInstallment && (
+        <div className="mt-2 flex items-center justify-between">
+          <span className="text-xs text-zinc-500">
+            Prossima rata: <span className="text-zinc-300">{formatDate(nextInstallment.dueDate)}</span>
+            <span className={`ml-1 ${isUrgent(nextInstallment.dueDate) ? 'text-amber-400' : 'text-zinc-500'}`}>
+              ({daysUntil(nextInstallment.dueDate)})
+            </span>
+          </span>
+          <span className="text-xs font-medium text-amber-400">
+            {formatCurrency(nextInstallment.amount)}
+          </span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Add Pending Modal ──────────────────────────────────────
 
 function AddPendingModal({
   type,
@@ -413,11 +487,17 @@ function AddPendingModal({
   type: 'credit' | 'debit'
   containers: Array<{ id: string; name: string; isActive: boolean; type: string }>
   onClose: () => void
-  onSave: (item: Omit<PendingItem, 'id' | 'status'>) => void
+  onSave: (item: {
+    description: string
+    amount: number
+    dueDate: string
+    containerId: string
+    type: TransactionType
+    notes?: string
+  }) => void
 }) {
   const [form, setForm] = useState({
     description: '',
-    counterpartyName: '',
     amount: '',
     dueDate: '',
     containerId: '',
@@ -428,102 +508,82 @@ function AddPendingModal({
     if (!form.description || !form.amount || !form.dueDate || !form.containerId) return
     onSave({
       description: form.description,
-      counterpartyName: form.counterpartyName,
       amount: parseFloat(form.amount),
       dueDate: form.dueDate,
-      direction: type,
       containerId: form.containerId,
+      type: (type === 'credit' ? 'income' : 'expense') as TransactionType,
       notes: form.notes || undefined,
     })
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-lg rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
-          <h2 className="text-lg font-semibold text-zinc-100">
-            Nuovo {type === 'credit' ? 'Credito' : 'Debito'}
-          </h2>
-          <button className="rounded-md p-1 text-zinc-400 hover:text-zinc-200" onClick={onClose}>
-            <X className="h-5 w-5" />
-          </button>
+    <Modal open onClose={onClose} title={`Nuovo ${type === 'credit' ? 'Credito' : 'Debito'}`} size="lg">
+      <div className="space-y-4">
+        <div>
+          <label className="block text-xs text-zinc-500 mb-1">Descrizione *</label>
+          <input
+            type="text"
+            value={form.description}
+            onChange={(e) => setForm({ ...form, description: e.target.value })}
+            className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500"
+          />
         </div>
-        <div className="p-6 space-y-4">
+        <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs text-zinc-500 mb-1">Descrizione *</label>
+            <label className="block text-xs text-zinc-500 mb-1">Importo *</label>
             <input
-              type="text"
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
+              type="number"
+              step="0.01"
+              value={form.amount}
+              onChange={(e) => setForm({ ...form, amount: e.target.value })}
               className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500"
             />
           </div>
           <div>
-            <label className="block text-xs text-zinc-500 mb-1">Controparte</label>
+            <label className="block text-xs text-zinc-500 mb-1">Scadenza *</label>
             <input
-              type="text"
-              value={form.counterpartyName}
-              onChange={(e) => setForm({ ...form, counterpartyName: e.target.value })}
-              className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs text-zinc-500 mb-1">Importo *</label>
-              <input
-                type="number"
-                step="0.01"
-                value={form.amount}
-                onChange={(e) => setForm({ ...form, amount: e.target.value })}
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-zinc-500 mb-1">Scadenza *</label>
-              <input
-                type="date"
-                value={form.dueDate}
-                onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs text-zinc-500 mb-1">Contenitore *</label>
-            <select
-              value={form.containerId}
-              onChange={(e) => setForm({ ...form, containerId: e.target.value })}
-              className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none"
-            >
-              <option value="">— Seleziona —</option>
-              {containers.filter((c) => c.isActive && c.type === 'bank_account').map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-zinc-500 mb-1">Note</label>
-            <input
-              type="text"
-              value={form.notes}
-              onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              type="date"
+              value={form.dueDate}
+              onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
               className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500"
             />
           </div>
         </div>
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-zinc-800">
-          <button className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-700" onClick={onClose}>
-            Annulla
-          </button>
-          <button
-            className="rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 disabled:opacity-50"
-            onClick={handleSave}
-            disabled={!form.description || !form.amount || !form.dueDate || !form.containerId}
+        <div>
+          <label className="block text-xs text-zinc-500 mb-1">Contenitore *</label>
+          <select
+            value={form.containerId}
+            onChange={(e) => setForm({ ...form, containerId: e.target.value })}
+            className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none"
           >
-            Crea {type === 'credit' ? 'Credito' : 'Debito'}
-          </button>
+            <option value="">Seleziona</option>
+            {containers.filter((c) => c.isActive).map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-zinc-500 mb-1">Note</label>
+          <input
+            type="text"
+            value={form.notes}
+            onChange={(e) => setForm({ ...form, notes: e.target.value })}
+            className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500"
+          />
         </div>
       </div>
-    </div>
+      <div className="flex items-center justify-end gap-3 mt-6">
+        <button className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-700" onClick={onClose}>
+          Annulla
+        </button>
+        <button
+          className="rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 disabled:opacity-50"
+          onClick={handleSave}
+          disabled={!form.description || !form.amount || !form.dueDate || !form.containerId}
+        >
+          Crea {type === 'credit' ? 'Credito' : 'Debito'}
+        </button>
+      </div>
+    </Modal>
   )
 }

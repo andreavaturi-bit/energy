@@ -312,12 +312,7 @@ export function Recurrences() {
                           ~stima
                         </span>
                       )}
-                      {rec.sharedWithSubjectId && (
-                        <span className="rounded-full bg-purple-500/10 px-1.5 py-0.5 text-[10px] text-purple-400">
-                          50/50
-                        </span>
-                      )}
-                      {!rec.isActive && (
+{!rec.isActive && (
                         <span className="rounded-full bg-zinc-700 px-2 py-0.5 text-xs text-zinc-400">
                           In pausa
                         </span>
@@ -778,8 +773,6 @@ function RecurrenceModal({
     containerId: recurrence?.containerId || '',
     counterpartyId: recurrence?.counterpartyId || '',
     type: (recurrence?.type || 'expense') as TransactionType,
-    sharedWithSubjectId: recurrence?.sharedWithSubjectId || '',
-    sharePercentage: recurrence?.sharePercentage || '',
     startDate: recurrence?.startDate || new Date().toISOString().split('T')[0],
     endDate: recurrence?.endDate || '',
     reminderDaysBefore: recurrence?.reminderDaysBefore,
@@ -799,8 +792,6 @@ function RecurrenceModal({
       containerId: form.containerId,
       counterpartyId: form.counterpartyId || undefined,
       type: form.type,
-      sharedWithSubjectId: form.sharedWithSubjectId || undefined,
-      sharePercentage: form.sharePercentage || undefined,
       startDate: form.startDate,
       endDate: form.endDate || undefined,
       reminderDaysBefore: form.reminderDaysBefore,
