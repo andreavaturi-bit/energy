@@ -174,7 +174,7 @@ export function createCrudHandler(config: CrudConfig) {
     if (method === 'GET' && id) {
       const { data, error } = await sb.from(table).select(resolvedSelectById).eq('id', id).single()
       if (error || !data) return notFound(res, notFoundMessage)
-      const row = transformRow ? transformRow(data as Record<string, unknown>) : data
+      const row = transformRow ? transformRow(data as unknown as Record<string, unknown>) : data
       return ok(res, row)
     }
 
@@ -218,7 +218,7 @@ export function createCrudHandler(config: CrudConfig) {
       if (error) throw error
 
       if (afterCreate) {
-        const replaced = await afterCreate(sb, data as Record<string, unknown>, body)
+        const replaced = await afterCreate(sb, data as unknown as Record<string, unknown>, body)
         if (replaced) return created(res, replaced)
       }
       return created(res, data)
@@ -268,8 +268,8 @@ export type CrudHandler = ReturnType<typeof createCrudHandler>
 export function composeHandler(
   fallback: CrudHandler,
   custom: (req: VercelRequest, res: VercelResponse, id: string | null) => Promise<boolean>,
-): CrudHandler {
-  return async function handler(req, res, id) {
+) {
+  return async function handler(req: VercelRequest, res: VercelResponse, id: string | null) {
     const handled = await custom(req, res, id)
     if (handled) return
     return fallback(req, res, id)
