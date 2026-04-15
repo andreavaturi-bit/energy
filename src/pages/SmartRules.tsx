@@ -28,6 +28,7 @@ import { smartRulesApi, type AutoTagResult, type RuleSuggestion } from '@/lib/ap
 import type { SmartRule, Tag, Container, Counterparty } from '@/types'
 import { useQueryClient } from '@tanstack/react-query'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { useModalState } from '@/hooks/useModalState'
 
 // ── Main component ─────────────────────────────────────────
 
@@ -40,8 +41,7 @@ export function SmartRules() {
   const deleteRule = useDeleteSmartRule()
   const queryClient = useQueryClient()
 
-  const [showModal, setShowModal] = useState(false)
-  const [editingRule, setEditingRule] = useState<SmartRule | null>(null)
+  const modal = useModalState<SmartRule>()
 
   // Auto-tag state
   const [autoTagging, setAutoTagging] = useState(false)
@@ -53,15 +53,8 @@ export function SmartRules() {
   const [suggestions, setSuggestions] = useState<RuleSuggestion[]>([])
   const [showSuggestions, setShowSuggestions] = useState(false)
 
-  function openCreate() {
-    setEditingRule(null)
-    setShowModal(true)
-  }
-
-  function openEdit(rule: SmartRule) {
-    setEditingRule(rule)
-    setShowModal(true)
-  }
+  const openCreate = modal.openCreate
+  const openEdit = modal.openEdit
 
   function handleDelete(id: string) {
     if (!confirm('Eliminare questa regola?')) return
@@ -273,13 +266,13 @@ export function SmartRules() {
       )}
 
       {/* Rule Modal */}
-      {showModal && (
+      {modal.isOpen && (
         <RuleModal
-          rule={editingRule}
+          rule={modal.editingItem}
           tags={tags}
           containers={containers}
           counterparties={counterparties}
-          onClose={() => setShowModal(false)}
+          onClose={modal.close}
         />
       )}
     </div>

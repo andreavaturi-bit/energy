@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { useModalState } from '@/hooks/useModalState'
 import {
   useContainers,
   useCounterparties,
@@ -104,8 +105,7 @@ export function Recurrences() {
   const [search, setSearch] = useState('')
   const [filterType, setFilterType] = useState<'all' | 'income' | 'expense' | 'transfer_out'>('all')
   const [showInactive, setShowInactive] = useState(false)
-  const [showModal, setShowModal] = useState(false)
-  const [editingRec, setEditingRec] = useState<Recurrence | null>(null)
+  const modal = useModalState<Recurrence>()
   const [showDetectWizard, setShowDetectWizard] = useState(false)
 
   const filtered = useMemo(() => {
@@ -159,7 +159,7 @@ export function Recurrences() {
             </button>
             <button
               className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors"
-              onClick={() => { setEditingRec(null); setShowModal(true) }}
+              onClick={() => modal.openCreate()}
             >
               <Plus className="h-4 w-4" />
               Nuova Ricorrenza
@@ -366,7 +366,7 @@ export function Recurrences() {
                     <button
                       className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
                       title="Modifica"
-                      onClick={() => { setEditingRec(rec); setShowModal(true) }}
+                      onClick={() => modal.openEdit(rec)}
                     >
                       <Pencil className="h-4 w-4" />
                     </button>
@@ -412,19 +412,19 @@ export function Recurrences() {
       </div>
 
       {/* Create/Edit Modal */}
-      {showModal && (
+      {modal.isOpen && (
         <RecurrenceModal
-          recurrence={editingRec}
+          recurrence={modal.editingItem}
           containers={containers}
           counterparties={counterparties}
-          onClose={() => setShowModal(false)}
+          onClose={modal.close}
           onSave={(data) => {
-            if (editingRec) {
-              updateRecurrence.mutate({ id: editingRec.id, data })
+            if (modal.editingItem) {
+              updateRecurrence.mutate({ id: modal.editingItem.id, data })
             } else {
               createRecurrence.mutate(data)
             }
-            setShowModal(false)
+            modal.close()
           }}
         />
       )}

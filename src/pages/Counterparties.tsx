@@ -26,6 +26,7 @@ import {
 } from '@/lib/hooks'
 import type { Counterparty, CounterpartyType } from '@/types'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { useModalState } from '@/hooks/useModalState'
 
 const typeConfig: Record<CounterpartyType, { label: string; color: string; icon: typeof User }> = {
   person: { label: 'Persona', color: 'bg-blue-500/10 text-blue-400', icon: User },
@@ -60,8 +61,7 @@ export function Counterparties() {
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState<'all' | CounterpartyType>('all')
   const [showInactive, setShowInactive] = useState(false)
-  const [showModal, setShowModal] = useState(false)
-  const [editingCp, setEditingCp] = useState<Counterparty | null>(null)
+  const modal = useModalState<Counterparty>()
   const [form, setForm] = useState<CounterpartyFormData>(emptyForm)
   const [menuOpen, setMenuOpen] = useState<string | null>(null)
 
@@ -93,20 +93,18 @@ export function Counterparties() {
   }, [filtered])
 
   function openCreate() {
-    setEditingCp(null)
     setForm(emptyForm)
-    setShowModal(true)
+    modal.openCreate()
   }
 
   function openEdit(cp: Counterparty) {
-    setEditingCp(cp)
     setForm({
       name: cp.name,
       type: (cp.type as CounterpartyType) || 'other',
       defaultCategory: cp.defaultCategory || '',
       notes: cp.notes || '',
     })
-    setShowModal(true)
+    modal.openEdit(cp)
     setMenuOpen(null)
   }
 
@@ -120,15 +118,15 @@ export function Counterparties() {
       notes: form.notes || null,
     }
 
-    if (editingCp) {
+    if (modal.editingItem) {
       updateCounterparty.mutate(
-        { id: editingCp.id, data: payload },
-        { onSuccess: () => setShowModal(false) },
+        { id: modal.editingItem.id, data: payload },
+        { onSuccess: () => modal.close() },
       )
     } else {
       createCounterparty.mutate(
         { ...payload, isActive: true },
-        { onSuccess: () => setShowModal(false) },
+        { onSuccess: () => modal.close() },
       )
     }
   }
@@ -330,16 +328,16 @@ export function Counterparties() {
       )}
 
       {/* Create/Edit Modal */}
-      {showModal && (
+      {modal.isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl">
             <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
               <h2 className="text-lg font-semibold text-zinc-100">
-                {editingCp ? 'Modifica Controparte' : 'Nuova Controparte'}
+                {modal.isEditing ? 'Modifica Controparte' : 'Nuova Controparte'}
               </h2>
               <button
                 className="rounded-md p-1 text-zinc-400 hover:text-zinc-200"
-                onClick={() => setShowModal(false)}
+                onClick={modal.close}
               >
                 <X className="h-5 w-5" />
               </button>
@@ -412,7 +410,7 @@ export function Counterparties() {
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-zinc-800">
               <button
                 className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-700 transition-colors"
-                onClick={() => setShowModal(false)}
+                onClick={modal.close}
               >
                 Annulla
               </button>
@@ -427,7 +425,7 @@ export function Counterparties() {
                     Salvataggio...
                   </span>
                 ) : (
-                  editingCp ? 'Salva Modifiche' : 'Crea Controparte'
+                  modal.isEditing ? 'Salva Modifiche' : 'Crea Controparte'
                 )}
               </button>
             </div>

@@ -28,6 +28,7 @@ import {
 } from '@/lib/hooks'
 import type { Subject, SubjectType, SubjectRole } from '@/types'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { useModalState } from '@/hooks/useModalState'
 
 const roleColors: Record<string, string> = {
   owner: 'bg-energy-500/10 text-energy-400',
@@ -82,8 +83,7 @@ export function Subjects() {
   const [search, setSearch] = useState('')
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
   const [showInactive, setShowInactive] = useState(false)
-  const [showModal, setShowModal] = useState(false)
-  const [editingSubject, setEditingSubject] = useState<Subject | null>(null)
+  const modal = useModalState<Subject>()
   const [form, setForm] = useState<SubjectFormData>(emptyForm)
   const [menuOpen, setMenuOpen] = useState<string | null>(null)
 
@@ -106,13 +106,11 @@ export function Subjects() {
   const companies = filtered.filter((s) => s.type === 'company')
 
   function openCreate() {
-    setEditingSubject(null)
     setForm(emptyForm)
-    setShowModal(true)
+    modal.openCreate()
   }
 
   function openEdit(subject: Subject) {
-    setEditingSubject(subject)
     setForm({
       type: subject.type,
       name: subject.name,
@@ -122,17 +120,17 @@ export function Subjects() {
       parentSubjectId: subject.parentSubjectId || '',
       notes: subject.notes || '',
     })
-    setShowModal(true)
+    modal.openEdit(subject)
     setMenuOpen(null)
   }
 
   function handleSave() {
     if (!form.name.trim()) return
 
-    if (editingSubject) {
+    if (modal.editingItem) {
       updateSubject.mutate(
         {
-          id: editingSubject.id,
+          id: modal.editingItem.id,
           data: {
             type: form.type,
             name: form.name,
@@ -145,7 +143,7 @@ export function Subjects() {
         },
         {
           onSuccess: () => {
-            setShowModal(false)
+            modal.close()
           },
         },
       )
@@ -163,7 +161,7 @@ export function Subjects() {
         },
         {
           onSuccess: () => {
-            setShowModal(false)
+            modal.close()
           },
         },
       )
@@ -507,16 +505,16 @@ export function Subjects() {
       )}
 
       {/* Create/Edit Modal */}
-      {showModal && (
+      {modal.isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="w-full max-w-lg rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl">
             <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
               <h2 className="text-lg font-semibold text-zinc-100">
-                {editingSubject ? 'Modifica Soggetto' : 'Nuovo Soggetto'}
+                {modal.isEditing ? 'Modifica Soggetto' : 'Nuovo Soggetto'}
               </h2>
               <button
                 className="rounded-md p-1 text-zinc-400 hover:text-zinc-200"
-                onClick={() => setShowModal(false)}
+                onClick={modal.close}
               >
                 <X className="h-5 w-5" />
               </button>
@@ -617,7 +615,7 @@ export function Subjects() {
                 >
                   <option value="">— Nessuno —</option>
                   {subjects
-                    .filter((s) => s.id !== editingSubject?.id && s.isActive)
+                    .filter((s) => s.id !== modal.editingItem?.id && s.isActive)
                     .map((s) => (
                       <option key={s.id} value={s.id}>{s.name}</option>
                     ))}
@@ -640,7 +638,7 @@ export function Subjects() {
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-zinc-800">
               <button
                 className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-700 transition-colors"
-                onClick={() => setShowModal(false)}
+                onClick={modal.close}
               >
                 Annulla
               </button>
@@ -655,7 +653,7 @@ export function Subjects() {
                     Salvataggio...
                   </span>
                 ) : (
-                  editingSubject ? 'Salva Modifiche' : 'Crea Soggetto'
+                  modal.isEditing ? 'Salva Modifiche' : 'Crea Soggetto'
                 )}
               </button>
             </div>
