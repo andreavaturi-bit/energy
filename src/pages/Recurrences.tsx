@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { FormModal } from '@/components/ui/FormModal'
 import { useModalState } from '@/hooks/useModalState'
 import {
   useContainers,
@@ -798,23 +799,20 @@ function RecurrenceModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 sticky top-0 bg-zinc-900 z-10">
-          <h2 className="text-lg font-semibold text-zinc-100">
-            {recurrence ? 'Modifica Ricorrenza' : 'Nuova Ricorrenza'}
-          </h2>
-          <button className="rounded-md p-1 text-zinc-400 hover:text-zinc-200" onClick={onClose}>
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
-        <div className="p-6 space-y-4">
+    <FormModal
+      title={recurrence ? 'Modifica Ricorrenza' : 'Nuova Ricorrenza'}
+      size="lg"
+      onClose={onClose}
+      onSubmit={handleSave}
+      submitDisabled={!form.description.trim() || !form.amount || !form.containerId}
+      submitLabel={recurrence ? 'Salva Modifiche' : 'Crea Ricorrenza'}
+    >
           {/* Type selector */}
           <div className="flex gap-2">
             {([['expense', 'Uscita', 'text-red-400 border-red-500 bg-red-500/10'], ['income', 'Entrata', 'text-emerald-400 border-emerald-500 bg-emerald-500/10'], ['transfer_out', 'Trasferimento', 'text-blue-400 border-blue-500 bg-blue-500/10']] as const).map(([type, label, activeClass]) => (
               <button
                 key={type}
+                type="button"
                 className={`flex-1 rounded-lg border px-3 py-2 text-sm transition-colors ${
                   form.type === type ? activeClass : 'border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600'
                 }`}
@@ -983,24 +981,6 @@ function RecurrenceModal({
               placeholder="es. 7"
             />
           </div>
-        </div>
-
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-zinc-800 sticky bottom-0 bg-zinc-900">
-          <button
-            className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-700 transition-colors"
-            onClick={onClose}
-          >
-            Annulla
-          </button>
-          <button
-            className="rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors disabled:opacity-50"
-            onClick={handleSave}
-            disabled={!form.description.trim() || !form.amount || !form.containerId}
-          >
-            {recurrence ? 'Salva Modifiche' : 'Crea Ricorrenza'}
-          </button>
-        </div>
-      </div>
-    </div>
+    </FormModal>
   )
 }

@@ -6,7 +6,6 @@ import {
   TrendingUp,
   TrendingDown,
   AlertTriangle,
-  X,
   Trash2,
   Loader2,
   Wallet,
@@ -21,6 +20,7 @@ import {
 } from '@/lib/hooks'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { FormModal } from '@/components/ui/FormModal'
 
 // After snakeToCamel, budget period data arrives in camelCase
 interface BudgetPeriodView {
@@ -72,53 +72,32 @@ function PeriodModal({
   const labelCls = 'block text-xs font-medium text-zinc-400 mb-1'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="w-full max-w-md mx-4 rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
-          <h2 className="text-lg font-semibold text-zinc-100">Nuovo Periodo Budget</h2>
-          <button onClick={onClose} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200">
-            <X className="h-5 w-5" />
-          </button>
+    <FormModal
+      title="Nuovo Periodo Budget"
+      size="md"
+      onClose={onClose}
+      onSubmit={handleSave}
+      submitDisabled={!form.name.trim() || !form.startDate || !form.endDate}
+      isSubmitting={isPending}
+      submittingLabel="Creazione..."
+      submitLabel="Crea Periodo"
+    >
+      <div>
+        <label className={labelCls}>Nome Periodo *</label>
+        <input type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Es. Marzo 2026" className={inputCls} />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className={labelCls}>Data Inizio *</label>
+          <input type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} className={`${inputCls} [color-scheme:dark]`} />
         </div>
-
-        <div className="space-y-4 px-6 py-5">
-          <div>
-            <label className={labelCls}>Nome Periodo *</label>
-            <input type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Es. Marzo 2026" className={inputCls} />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls}>Data Inizio *</label>
-              <input type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} className={`${inputCls} [color-scheme:dark]`} />
-            </div>
-            <div>
-              <label className={labelCls}>Data Fine *</label>
-              <input type="date" value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} className={`${inputCls} [color-scheme:dark]`} />
-            </div>
-          </div>
-        </div>
-
-        <div className="flex justify-end gap-3 border-t border-zinc-800 px-6 py-4">
-          <button onClick={onClose} className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:border-zinc-600">
-            Annulla
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={!form.name.trim() || !form.startDate || !form.endDate || isPending}
-            className="rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {isPending ? (
-              <span className="flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" /> Creazione...
-              </span>
-            ) : (
-              'Crea Periodo'
-            )}
-          </button>
+        <div>
+          <label className={labelCls}>Data Fine *</label>
+          <input type="date" value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} className={`${inputCls} [color-scheme:dark]`} />
         </div>
       </div>
-    </div>
+    </FormModal>
   )
 }
 
@@ -163,59 +142,37 @@ function AllocationModal({
   const labelCls = 'block text-xs font-medium text-zinc-400 mb-1'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="w-full max-w-md mx-4 rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
-          <h2 className="text-lg font-semibold text-zinc-100">Nuova Allocazione</h2>
-          <button onClick={onClose} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200">
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
-        <div className="space-y-4 px-6 py-5">
-          <div>
-            <label className={labelCls}>Categoria (da tag)</label>
-            <select value={form.tagId} onChange={(e) => setForm({ ...form, tagId: e.target.value })} className={inputCls}>
-              <option value="">- Categoria libera -</option>
-              {categoryTags.map((t) => (
-                <option key={t.id} value={t.id}>{t.name}</option>
-              ))}
-            </select>
-          </div>
-
-          {!form.tagId && (
-            <div>
-              <label className={labelCls}>Nome Categoria *</label>
-              <input type="text" value={form.customCategory} onChange={(e) => setForm({ ...form, customCategory: e.target.value })} placeholder="Es. Abbigliamento, Ristorazione..." className={inputCls} />
-            </div>
-          )}
-
-          <div>
-            <label className={labelCls}>Importo Allocato *</label>
-            <input type="number" step="0.01" min="0" value={form.allocated} onChange={(e) => setForm({ ...form, allocated: e.target.value })} placeholder="0,00" className={inputCls} />
-          </div>
-        </div>
-
-        <div className="flex justify-end gap-3 border-t border-zinc-800 px-6 py-4">
-          <button onClick={onClose} className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:border-zinc-600">
-            Annulla
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={(!form.tagId && !form.customCategory.trim()) || !form.allocated || parseFloat(form.allocated) <= 0 || isPending}
-            className="rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {isPending ? (
-              <span className="flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" /> Salvataggio...
-              </span>
-            ) : (
-              'Aggiungi'
-            )}
-          </button>
-        </div>
+    <FormModal
+      title="Nuova Allocazione"
+      size="md"
+      onClose={onClose}
+      onSubmit={handleSave}
+      submitDisabled={(!form.tagId && !form.customCategory.trim()) || !form.allocated || parseFloat(form.allocated) <= 0}
+      isSubmitting={isPending}
+      submitLabel="Aggiungi"
+    >
+      <div>
+        <label className={labelCls}>Categoria (da tag)</label>
+        <select value={form.tagId} onChange={(e) => setForm({ ...form, tagId: e.target.value })} className={inputCls}>
+          <option value="">- Categoria libera -</option>
+          {categoryTags.map((t) => (
+            <option key={t.id} value={t.id}>{t.name}</option>
+          ))}
+        </select>
       </div>
-    </div>
+
+      {!form.tagId && (
+        <div>
+          <label className={labelCls}>Nome Categoria *</label>
+          <input type="text" value={form.customCategory} onChange={(e) => setForm({ ...form, customCategory: e.target.value })} placeholder="Es. Abbigliamento, Ristorazione..." className={inputCls} />
+        </div>
+      )}
+
+      <div>
+        <label className={labelCls}>Importo Allocato *</label>
+        <input type="number" step="0.01" min="0" value={form.allocated} onChange={(e) => setForm({ ...form, allocated: e.target.value })} placeholder="0,00" className={inputCls} />
+      </div>
+    </FormModal>
   )
 }
 

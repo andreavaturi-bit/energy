@@ -32,6 +32,7 @@ import {
 } from '@/lib/hooks'
 import { containerTypeLabel, formatCurrency } from '@/lib/utils'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { FormModal } from '@/components/ui/FormModal'
 
 // ---------------------------------------------------------------------------
 // Icon map
@@ -139,16 +140,15 @@ function ContainerModal({
   const labelCls = 'block text-xs font-medium text-zinc-400 mb-1'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
-          <h2 className="text-lg font-semibold text-zinc-100">{isEdit ? 'Modifica Contenitore' : 'Nuovo Contenitore'}</h2>
-          <button onClick={onClose} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200">
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
-        <div className="space-y-4 px-6 py-5">
+    <FormModal
+      title={isEdit ? 'Modifica Contenitore' : 'Nuovo Contenitore'}
+      size="lg"
+      onClose={onClose}
+      onSubmit={handleSave}
+      submitDisabled={!form.name.trim() || !form.subjectId}
+      isSubmitting={isSaving}
+      submitLabel={isEdit ? 'Salva Modifiche' : 'Salva Contenitore'}
+    >
           {/* Name */}
           <div>
             <label className={labelCls}>Nome *</label>
@@ -266,37 +266,14 @@ function ContainerModal({
             <label className={labelCls}>Note</label>
             <textarea rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Note opzionali..." className={inputCls} />
           </div>
-        </div>
 
-        <div className="border-t border-zinc-800 px-6 py-4 space-y-3">
           {saveError && (
             <div className="flex items-start gap-2 rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2">
               <AlertCircle className="h-4 w-4 text-red-400 mt-0.5 shrink-0" />
               <p className="text-xs text-red-400">{saveError}</p>
             </div>
           )}
-          <div className="flex justify-end gap-3">
-            <button onClick={onClose} className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:border-zinc-600">
-              Annulla
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={!form.name.trim() || !form.subjectId || isSaving}
-              className="rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {isSaving ? (
-                <span className="flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Salvataggio...
-                </span>
-              ) : (
-                isEdit ? 'Salva Modifiche' : 'Salva Contenitore'
-              )}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+    </FormModal>
   )
 }
 

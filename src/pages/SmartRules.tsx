@@ -28,6 +28,7 @@ import { smartRulesApi, type AutoTagResult, type RuleSuggestion } from '@/lib/ap
 import type { SmartRule, Tag, Container, Counterparty } from '@/types'
 import { useQueryClient } from '@tanstack/react-query'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { FormModal } from '@/components/ui/FormModal'
 import { useModalState } from '@/hooks/useModalState'
 
 // ── Main component ─────────────────────────────────────────
@@ -561,18 +562,15 @@ function RuleModal({
   const isSaving = createRule.isPending || updateRule.isPending
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
-          <h2 className="text-lg font-semibold text-zinc-100">
-            {rule ? 'Modifica Regola' : 'Nuova Regola'}
-          </h2>
-          <button onClick={onClose} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200">
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
-        <div className="space-y-4 px-6 py-5">
+    <FormModal
+      title={rule ? 'Modifica Regola' : 'Nuova Regola'}
+      size="lg"
+      onClose={onClose}
+      onSubmit={handleSave}
+      submitDisabled={!canSave}
+      isSubmitting={isSaving}
+      submitLabel={rule ? 'Salva Modifiche' : 'Crea Regola'}
+    >
           {/* Name */}
           <div>
             <label className={labelCls}>Nome regola *</label>
@@ -727,22 +725,6 @@ function RuleModal({
               </div>
             </div>
           </div>
-        </div>
-
-        <div className="border-t border-zinc-800 px-6 py-4 flex justify-end gap-3">
-          <button onClick={onClose} className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:border-zinc-600">
-            Annulla
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={!canSave || isSaving}
-            className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 disabled:opacity-50 transition-colors"
-          >
-            {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
-            {rule ? 'Salva Modifiche' : 'Crea Regola'}
-          </button>
-        </div>
-      </div>
-    </div>
+    </FormModal>
   )
 }
