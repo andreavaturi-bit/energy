@@ -25,6 +25,7 @@ import {
   useDeleteCounterparty,
 } from '@/lib/hooks'
 import type { Counterparty, CounterpartyType } from '@/types'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 const typeConfig: Record<CounterpartyType, { label: string; color: string; icon: typeof User }> = {
   person: { label: 'Persona', color: 'bg-blue-500/10 text-blue-400', icon: User },
@@ -170,21 +171,19 @@ export function Counterparties() {
   return (
     <div className="space-y-6" onClick={() => menuOpen && setMenuOpen(null)}>
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-zinc-100">Controparti</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            {activeCount} controparti attive su {counterparties.length} totali
-          </p>
-        </div>
-        <button
-          className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors"
-          onClick={openCreate}
-        >
-          <Plus className="h-4 w-4" />
-          Nuova Controparte
-        </button>
-      </div>
+      <PageHeader
+        title="Controparti"
+        description={`${activeCount} controparti attive su ${counterparties.length} totali`}
+        actions={
+          <button
+            className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors"
+            onClick={openCreate}
+          >
+            <Plus className="h-4 w-4" />
+            Nuova Controparte
+          </button>
+        }
+      />
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">

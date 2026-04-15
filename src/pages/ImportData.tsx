@@ -16,6 +16,7 @@ import {
   ShieldCheck,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
+import { PageHeader } from '@/components/ui/PageHeader'
 import {
   PRESET_PROFILES,
   detectProfile,
@@ -724,12 +725,10 @@ export function ImportData() {
   return (
     <div className="space-y-6">
       {/* Page header */}
-      <div>
-        <h1 className="text-2xl font-bold text-zinc-100">Importa Dati</h1>
-        <p className="mt-1 text-sm text-zinc-400">
-          Importa transazioni da file CSV nel contenitore selezionato
-        </p>
-      </div>
+      <PageHeader
+        title="Importa Dati"
+        description="Importa transazioni da file CSV nel contenitore selezionato"
+      />
 
       {/* Step indicator */}
       <div className="rounded-xl border border-zinc-800 bg-zinc-900 px-6 py-4">

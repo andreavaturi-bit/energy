@@ -17,6 +17,7 @@ import {
   AlertCircle,
 } from 'lucide-react'
 import { StatCard } from '@/components/ui/StatCard'
+import { PageHeader } from '@/components/ui/PageHeader'
 import { useDashboardStats, useContainers, useSubjects } from '@/lib/hooks'
 import {
   formatCurrency,
@@ -121,12 +122,10 @@ export function Dashboard() {
   return (
     <div className="space-y-6">
       {/* 1. Greeting header */}
-      <div>
-        <h1 className="text-2xl font-bold text-zinc-100">Ciao Andrea</h1>
-        <p className="mt-1 text-sm text-zinc-400 capitalize">
-          {todayFormatted}
-        </p>
-      </div>
+      <PageHeader
+        title="Ciao Andrea"
+        description={<span className="capitalize">{todayFormatted}</span>}
+      />
 
       {/* 2. Summary stat cards */}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">

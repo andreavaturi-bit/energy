@@ -31,6 +31,7 @@ import {
   useToggleContainerPin,
 } from '@/lib/hooks'
 import { containerTypeLabel, formatCurrency } from '@/lib/utils'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 // ---------------------------------------------------------------------------
 // Icon map
@@ -467,22 +468,24 @@ export function Containers() {
   return (
     <div className="space-y-6">
       {/* ============ HEADER ============ */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-zinc-100">Contenitori</h1>
-          <p className="mt-1 text-sm text-zinc-400">
+      <PageHeader
+        title="Contenitori"
+        description={
+          <>
             {totalCount} contenitori &middot; Saldo totale{' '}
             <span className="font-semibold text-zinc-200">{headerBalance}</span>
-          </p>
-        </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors self-start"
-        >
-          <Plus className="h-4 w-4" />
-          Nuovo Contenitore
-        </button>
-      </div>
+          </>
+        }
+        actions={
+          <button
+            onClick={() => setShowCreate(true)}
+            className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors"
+          >
+            <Plus className="h-4 w-4" />
+            Nuovo Contenitore
+          </button>
+        }
+      />
 
       {/* ============ FILTER BAR ============ */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:flex-wrap">

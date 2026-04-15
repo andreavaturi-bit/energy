@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { useContainers, useRecurrences, useTransactions } from '@/lib/hooks'
 import { formatCurrency } from '@/lib/utils'
+import { PageHeader } from '@/components/ui/PageHeader'
 import type { Recurrence } from '@/types'
 
 interface ProjectionEvent {
@@ -222,12 +223,10 @@ export function Projections() {
   return (
     <div className="space-y-6">
       {/* Page header */}
-      <div>
-        <h1 className="text-2xl font-bold text-zinc-100">Proiezioni</h1>
-        <p className="mt-1 text-sm text-zinc-400">
-          Flusso di cassa previsto basato su ricorrenze, pendenze e piani rateali
-        </p>
-      </div>
+      <PageHeader
+        title="Proiezioni"
+        description="Flusso di cassa previsto basato su ricorrenze, pendenze e piani rateali"
+      />
 
       {/* Summary cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">

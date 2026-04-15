@@ -19,6 +19,7 @@ import {
   ChevronRight,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
+import { PageHeader } from '@/components/ui/PageHeader'
 import {
   useContainers,
   useCounterparties,
@@ -144,30 +145,28 @@ export function Recurrences() {
   return (
     <div className="space-y-6">
       {/* Page header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-zinc-100">Ricorrenze</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            {activeRecs.length} ricorrenze attive, {inactiveCount} in pausa
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            className="flex items-center gap-2 rounded-lg border border-purple-500/50 bg-purple-500/10 px-4 py-2 text-sm font-medium text-purple-400 hover:bg-purple-500/20 transition-colors"
-            onClick={() => setShowDetectWizard(true)}
-          >
-            <Wand2 className="h-4 w-4" />
-            Rileva Automaticamente
-          </button>
-          <button
-            className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors"
-            onClick={() => { setEditingRec(null); setShowModal(true) }}
-          >
-            <Plus className="h-4 w-4" />
-            Nuova Ricorrenza
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Ricorrenze"
+        description={`${activeRecs.length} ricorrenze attive, ${inactiveCount} in pausa`}
+        actions={
+          <>
+            <button
+              className="flex items-center gap-2 rounded-lg border border-purple-500/50 bg-purple-500/10 px-4 py-2 text-sm font-medium text-purple-400 hover:bg-purple-500/20 transition-colors"
+              onClick={() => setShowDetectWizard(true)}
+            >
+              <Wand2 className="h-4 w-4" />
+              Rileva Automaticamente
+            </button>
+            <button
+              className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors"
+              onClick={() => { setEditingRec(null); setShowModal(true) }}
+            >
+              <Plus className="h-4 w-4" />
+              Nuova Ricorrenza
+            </button>
+          </>
+        }
+      />
 
       {/* Stats */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">

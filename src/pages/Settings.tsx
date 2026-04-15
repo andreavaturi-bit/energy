@@ -16,6 +16,7 @@ import {
 } from '@/lib/hooks'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Modal } from '@/components/ui/Modal'
+import { PageHeader } from '@/components/ui/PageHeader'
 import type { ImportProfile } from '@/types'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
@@ -58,12 +59,10 @@ export function Settings() {
   return (
     <div className="space-y-6">
       {/* Page header */}
-      <div>
-        <h1 className="text-2xl font-bold text-zinc-100">Impostazioni</h1>
-        <p className="mt-1 text-sm text-zinc-400">
-          Profili di import e esportazione dati
-        </p>
-      </div>
+      <PageHeader
+        title="Impostazioni"
+        description="Profili di import e esportazione dati"
+      />
 
       {/* Import profiles */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">

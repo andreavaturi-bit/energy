@@ -27,6 +27,7 @@ import {
   useDeleteSubject,
 } from '@/lib/hooks'
 import type { Subject, SubjectType, SubjectRole } from '@/types'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 const roleColors: Record<string, string> = {
   owner: 'bg-energy-500/10 text-energy-400',
@@ -388,21 +389,19 @@ export function Subjects() {
   return (
     <div className="space-y-6" onClick={() => menuOpen && setMenuOpen(null)}>
       {/* Page header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-zinc-100">Soggetti</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            {subjects.filter((s) => s.isActive).length} soggetti attivi ({persons.length} persone, {companies.length} societa')
-          </p>
-        </div>
-        <button
-          className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors"
-          onClick={openCreate}
-        >
-          <Plus className="h-4 w-4" />
-          Nuovo Soggetto
-        </button>
-      </div>
+      <PageHeader
+        title="Soggetti"
+        description={`${subjects.filter((s) => s.isActive).length} soggetti attivi (${persons.length} persone, ${companies.length} societa')`}
+        actions={
+          <button
+            className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors"
+            onClick={openCreate}
+          >
+            <Plus className="h-4 w-4" />
+            Nuovo Soggetto
+          </button>
+        }
+      />
 
       {/* Search and controls */}
       <div className="flex items-center gap-3">

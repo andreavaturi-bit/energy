@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import { useTags, useCreateTag, useUpdateTag, useDeleteTag } from '@/lib/hooks'
 import { SearchableSelect } from '@/components/ui/SearchableSelect'
+import { PageHeader } from '@/components/ui/PageHeader'
 import type { Tag, TagType } from '@/types'
 
 // ── Constants ───────────────────────────────────────────────
@@ -431,21 +432,19 @@ export function Tags() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-zinc-100">Tag</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            {scopeCount} ambiti, {categoryCount} categorie, {tagCount} tag
-          </p>
-        </div>
-        <button
-          className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors"
-          onClick={() => openCreate()}
-        >
-          <Plus className="h-4 w-4" />
-          Nuovo Tag
-        </button>
-      </div>
+      <PageHeader
+        title="Tag"
+        description={`${scopeCount} ambiti, ${categoryCount} categorie, ${tagCount} tag`}
+        actions={
+          <button
+            className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors"
+            onClick={() => openCreate()}
+          >
+            <Plus className="h-4 w-4" />
+            Nuovo Tag
+          </button>
+        }
+      />
 
       {/* Hierarchy explanation */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">

@@ -29,6 +29,7 @@ import {
   Copy,
 } from 'lucide-react'
 import { SearchableSelect, SearchableMultiSelect } from '@/components/ui/SearchableSelect'
+import { PageHeader } from '@/components/ui/PageHeader'
 import type { Transaction, TransactionType, TransactionStatus, Container, Counterparty, Subject, Tag } from '@/types'
 import {
   useTransactions,
@@ -1144,21 +1145,19 @@ export function Transactions() {
   return (
     <div className="space-y-6">
       {/* ── Page header ──────────────────────────────────── */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-zinc-100">Transazioni</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            Registro completo di tutte le operazioni finanziarie
-          </p>
-        </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors"
-        >
-          <Plus className="h-4 w-4" />
-          Nuova Transazione
-        </button>
-      </div>
+      <PageHeader
+        title="Transazioni"
+        description="Registro completo di tutte le operazioni finanziarie"
+        actions={
+          <button
+            onClick={() => setShowCreate(true)}
+            className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors"
+          >
+            <Plus className="h-4 w-4" />
+            Nuova Transazione
+          </button>
+        }
+      />
 
       {/* ── Filter bar ───────────────────────────────────── */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">

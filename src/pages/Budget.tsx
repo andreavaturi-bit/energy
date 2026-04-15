@@ -20,6 +20,7 @@ import {
   useDeleteBudgetPeriod,
 } from '@/lib/hooks'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 // After snakeToCamel, budget period data arrives in camelCase
 interface BudgetPeriodView {
@@ -316,21 +317,19 @@ export function Budget() {
   if (!currentPeriod) {
     return (
       <div className="space-y-6">
-        <div className="flex items-start justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-zinc-100">Budget</h1>
-            <p className="mt-1 text-sm text-zinc-400">
-              Pianifica e monitora le allocazioni di spesa per periodo
-            </p>
-          </div>
-          <button
-            onClick={() => setShowPeriodModal(true)}
-            className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors"
-          >
-            <Plus className="h-4 w-4" />
-            Nuovo Periodo
-          </button>
-        </div>
+        <PageHeader
+          title="Budget"
+          description="Pianifica e monitora le allocazioni di spesa per periodo"
+          actions={
+            <button
+              onClick={() => setShowPeriodModal(true)}
+              className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors"
+            >
+              <Plus className="h-4 w-4" />
+              Nuovo Periodo
+            </button>
+          }
+        />
         <EmptyState
           icon={Wallet}
           title="Nessun periodo budget"
@@ -351,31 +350,29 @@ export function Budget() {
   return (
     <div className="space-y-6">
       {/* Page header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-zinc-100">Budget</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            Pianifica e monitora le allocazioni di spesa per periodo
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleDeletePeriod}
-            disabled={deletePeriodMutation.isPending}
-            className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-400 hover:border-red-800 hover:text-red-400 transition-colors disabled:opacity-50"
-            title="Elimina periodo"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
-          <button
-            onClick={() => setShowPeriodModal(true)}
-            className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors"
-          >
-            <Plus className="h-4 w-4" />
-            Nuovo Periodo
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Budget"
+        description="Pianifica e monitora le allocazioni di spesa per periodo"
+        actions={
+          <>
+            <button
+              onClick={handleDeletePeriod}
+              disabled={deletePeriodMutation.isPending}
+              className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-400 hover:border-red-800 hover:text-red-400 transition-colors disabled:opacity-50"
+              title="Elimina periodo"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => setShowPeriodModal(true)}
+              className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors"
+            >
+              <Plus className="h-4 w-4" />
+              Nuovo Periodo
+            </button>
+          </>
+        }
+      />
 
       {/* Period selector */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">

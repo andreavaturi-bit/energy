@@ -12,6 +12,7 @@ import {
 import { statsApi, type TagBreakdownItem, type MonthlyTrendItem, type BurningRateStats } from '@/lib/api'
 import { useContainers } from '@/lib/hooks'
 import { SearchableSelect } from '@/components/ui/SearchableSelect'
+import { PageHeader } from '@/components/ui/PageHeader'
 import { formatCurrency } from '@/lib/utils'
 
 const monthLabels: Record<string, string> = {
@@ -245,12 +246,10 @@ export function Statistics() {
   return (
     <div className="space-y-6">
       {/* Page header */}
-      <div>
-        <h1 className="text-2xl font-bold text-zinc-100">Statistiche</h1>
-        <p className="mt-1 text-sm text-zinc-400">
-          Analisi dettagliata delle tue finanze per categoria, trend e burning rate
-        </p>
-      </div>
+      <PageHeader
+        title="Statistiche"
+        description="Analisi dettagliata delle tue finanze per categoria, trend e burning rate"
+      />
 
       {/* Errors */}
       {errors.length > 0 && (

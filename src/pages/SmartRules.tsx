@@ -27,6 +27,7 @@ import {
 import { smartRulesApi, type AutoTagResult, type RuleSuggestion } from '@/lib/api'
 import type { SmartRule, Tag, Container, Counterparty } from '@/types'
 import { useQueryClient } from '@tanstack/react-query'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 // ── Main component ─────────────────────────────────────────
 
@@ -126,14 +127,10 @@ export function SmartRules() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-zinc-100">Regole Smart</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            Categorizzazione automatica delle transazioni tramite regole intelligenti
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+      <PageHeader
+        title="Regole Smart"
+        description="Categorizzazione automatica delle transazioni tramite regole intelligenti"
+        actions={
           <button
             onClick={openCreate}
             className="flex items-center gap-2 rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors"
@@ -141,8 +138,8 @@ export function SmartRules() {
             <Plus className="h-4 w-4" />
             Nuova Regola
           </button>
-        </div>
-      </div>
+        }
+      />
 
       {/* Action buttons */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">

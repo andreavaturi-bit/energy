@@ -23,6 +23,7 @@ import {
 import { formatCurrency } from '@/lib/utils'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Modal } from '@/components/ui/Modal'
+import { PageHeader } from '@/components/ui/PageHeader'
 import type { Transaction, TransactionType, InstallmentPlan, Installment } from '@/types'
 
 const INCOME_TYPES = ['income', 'transfer_in', 'loan_in', 'repayment_in'] as const
@@ -122,12 +123,10 @@ export function Pendenze() {
   return (
     <div className="space-y-6">
       {/* Page header */}
-      <div>
-        <h1 className="text-2xl font-bold text-zinc-100">Pendenze</h1>
-        <p className="mt-1 text-sm text-zinc-400">
-          Crediti da incassare, debiti da saldare e piani rateali in corso
-        </p>
-      </div>
+      <PageHeader
+        title="Pendenze"
+        description="Crediti da incassare, debiti da saldare e piani rateali in corso"
+      />
 
       {/* Summary */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
