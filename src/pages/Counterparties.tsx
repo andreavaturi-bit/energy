@@ -5,7 +5,6 @@ import {
   Search,
   Pencil,
   Trash2,
-  X,
   Loader2,
   AlertCircle,
   Eye,
@@ -27,6 +26,7 @@ import {
 import type { Counterparty, CounterpartyType } from '@/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { useModalState } from '@/hooks/useModalState'
+import { FormModal } from '@/components/ui/FormModal'
 
 const typeConfig: Record<CounterpartyType, { label: string; color: string; icon: typeof User }> = {
   person: { label: 'Persona', color: 'bg-blue-500/10 text-blue-400', icon: User },
@@ -329,108 +329,78 @@ export function Counterparties() {
 
       {/* Create/Edit Modal */}
       {modal.isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
-              <h2 className="text-lg font-semibold text-zinc-100">
-                {modal.isEditing ? 'Modifica Controparte' : 'Nuova Controparte'}
-              </h2>
-              <button
-                className="rounded-md p-1 text-zinc-400 hover:text-zinc-200"
-                onClick={modal.close}
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
+        <FormModal
+          title={modal.isEditing ? 'Modifica Controparte' : 'Nuova Controparte'}
+          size="md"
+          onClose={modal.close}
+          onSubmit={handleSave}
+          submitDisabled={!form.name.trim()}
+          isSubmitting={createCounterparty.isPending || updateCounterparty.isPending}
+          submitLabel={modal.isEditing ? 'Salva Modifiche' : 'Crea Controparte'}
+        >
+          {/* Name */}
+          <div>
+            <label className="block text-xs text-zinc-500 mb-1">Nome *</label>
+            <input
+              type="text"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500"
+              placeholder="es. Amazon, ENEL, Mario Rossi..."
+            />
+          </div>
 
-            <div className="p-6 space-y-4">
-              {/* Name */}
-              <div>
-                <label className="block text-xs text-zinc-500 mb-1">Nome *</label>
-                <input
-                  type="text"
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500"
-                  placeholder="es. Amazon, ENEL, Mario Rossi..."
-                />
-              </div>
-
-              {/* Type */}
-              <div>
-                <label className="block text-xs text-zinc-500 mb-1">Tipo</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(Object.entries(typeConfig) as [CounterpartyType, typeof typeConfig.person][]).map(
-                    ([key, cfg]) => {
-                      const Icon = cfg.icon
-                      return (
-                        <button
-                          key={key}
-                          className={`flex items-center justify-center gap-1.5 rounded-lg border px-2 py-2 text-xs transition-colors ${
-                            form.type === key
-                              ? `border-energy-500 ${cfg.color}`
-                              : 'border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600'
-                          }`}
-                          onClick={() => setForm({ ...form, type: key })}
-                        >
-                          <Icon className="h-3.5 w-3.5" />
-                          {cfg.label}
-                        </button>
-                      )
-                    },
-                  )}
-                </div>
-              </div>
-
-              {/* Default Category */}
-              <div>
-                <label className="block text-xs text-zinc-500 mb-1">Categoria Default (opzionale)</label>
-                <input
-                  type="text"
-                  value={form.defaultCategory}
-                  onChange={(e) => setForm({ ...form, defaultCategory: e.target.value })}
-                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500"
-                  placeholder="es. Spese casa, Abbonamenti, Stipendi..."
-                />
-              </div>
-
-              {/* Notes */}
-              <div>
-                <label className="block text-xs text-zinc-500 mb-1">Note</label>
-                <textarea
-                  value={form.notes}
-                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                  rows={2}
-                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500 resize-none"
-                  placeholder="Note aggiuntive..."
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-zinc-800">
-              <button
-                className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-700 transition-colors"
-                onClick={modal.close}
-              >
-                Annulla
-              </button>
-              <button
-                className="rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors disabled:opacity-50"
-                onClick={handleSave}
-                disabled={!form.name.trim() || createCounterparty.isPending || updateCounterparty.isPending}
-              >
-                {(createCounterparty.isPending || updateCounterparty.isPending) ? (
-                  <span className="flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Salvataggio...
-                  </span>
-                ) : (
-                  modal.isEditing ? 'Salva Modifiche' : 'Crea Controparte'
-                )}
-              </button>
+          {/* Type */}
+          <div>
+            <label className="block text-xs text-zinc-500 mb-1">Tipo</label>
+            <div className="grid grid-cols-3 gap-2">
+              {(Object.entries(typeConfig) as [CounterpartyType, typeof typeConfig.person][]).map(
+                ([key, cfg]) => {
+                  const Icon = cfg.icon
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      className={`flex items-center justify-center gap-1.5 rounded-lg border px-2 py-2 text-xs transition-colors ${
+                        form.type === key
+                          ? `border-energy-500 ${cfg.color}`
+                          : 'border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600'
+                      }`}
+                      onClick={() => setForm({ ...form, type: key })}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                      {cfg.label}
+                    </button>
+                  )
+                },
+              )}
             </div>
           </div>
-        </div>
+
+          {/* Default Category */}
+          <div>
+            <label className="block text-xs text-zinc-500 mb-1">Categoria Default (opzionale)</label>
+            <input
+              type="text"
+              value={form.defaultCategory}
+              onChange={(e) => setForm({ ...form, defaultCategory: e.target.value })}
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500"
+              placeholder="es. Spese casa, Abbonamenti, Stipendi..."
+            />
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label className="block text-xs text-zinc-500 mb-1">Note</label>
+            <textarea
+              value={form.notes}
+              onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              rows={2}
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500 resize-none"
+              placeholder="Note aggiuntive..."
+            />
+          </div>
+        </FormModal>
       )}
     </div>
   )

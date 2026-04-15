@@ -20,6 +20,7 @@ import {
 import { useTags, useCreateTag, useUpdateTag, useDeleteTag } from '@/lib/hooks'
 import { SearchableSelect } from '@/components/ui/SearchableSelect'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { FormModal } from '@/components/ui/FormModal'
 import type { Tag, TagType } from '@/types'
 
 // ── Constants ───────────────────────────────────────────────
@@ -718,17 +719,14 @@ function TagModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-md mx-4 rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
-          <h2 className="text-lg font-semibold text-zinc-100">
-            {tag ? 'Modifica Tag' : 'Nuovo Tag'}
-          </h2>
-          <button className="rounded-md p-1 text-zinc-400 hover:text-zinc-200" onClick={onClose}>
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-        <div className="p-6 space-y-4">
+    <FormModal
+      title={tag ? 'Modifica Tag' : 'Nuovo Tag'}
+      size="md"
+      onClose={onClose}
+      onSubmit={handleSave}
+      submitDisabled={!form.name.trim()}
+      submitLabel={tag ? 'Salva' : 'Crea Tag'}
+    >
           {/* Name */}
           <div>
             <label className="block text-xs text-zinc-500 mb-1">Nome *</label>
@@ -789,20 +787,6 @@ function TagModal({
               </div>
             </div>
           </div>
-        </div>
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-zinc-800">
-          <button className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-700" onClick={onClose}>
-            Annulla
-          </button>
-          <button
-            className="rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 disabled:opacity-50"
-            onClick={handleSave}
-            disabled={!form.name.trim()}
-          >
-            {tag ? 'Salva' : 'Crea Tag'}
-          </button>
-        </div>
-      </div>
-    </div>
+    </FormModal>
   )
 }

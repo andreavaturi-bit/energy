@@ -9,7 +9,6 @@ import {
   MoreHorizontal,
   Pencil,
   Trash2,
-  X,
   Wallet,
   Users,
   ChevronRight,
@@ -29,6 +28,7 @@ import {
 import type { Subject, SubjectType, SubjectRole } from '@/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { useModalState } from '@/hooks/useModalState'
+import { FormModal } from '@/components/ui/FormModal'
 
 const roleColors: Record<string, string> = {
   owner: 'bg-energy-500/10 text-energy-400',
@@ -506,159 +506,130 @@ export function Subjects() {
 
       {/* Create/Edit Modal */}
       {modal.isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
-              <h2 className="text-lg font-semibold text-zinc-100">
-                {modal.isEditing ? 'Modifica Soggetto' : 'Nuovo Soggetto'}
-              </h2>
-              <button
-                className="rounded-md p-1 text-zinc-400 hover:text-zinc-200"
-                onClick={modal.close}
-              >
-                <X className="h-5 w-5" />
-              </button>
+        <FormModal
+          title={modal.isEditing ? 'Modifica Soggetto' : 'Nuovo Soggetto'}
+          size="lg"
+          onClose={modal.close}
+          onSubmit={handleSave}
+          submitDisabled={!form.name.trim()}
+          isSubmitting={createSubject.isPending || updateSubject.isPending}
+          submitLabel={modal.isEditing ? 'Salva Modifiche' : 'Crea Soggetto'}
+        >
+          {/* Type */}
+          <div className="flex gap-3">
+            <button
+              type="button"
+              className={`flex-1 flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                form.type === 'person'
+                  ? 'border-blue-500 bg-blue-500/10 text-blue-400'
+                  : 'border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600'
+              }`}
+              onClick={() => setForm({ ...form, type: 'person', legalForm: '' })}
+            >
+              <User className="h-4 w-4" /> Persona Fisica
+            </button>
+            <button
+              type="button"
+              className={`flex-1 flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                form.type === 'company'
+                  ? 'border-amber-500 bg-amber-500/10 text-amber-400'
+                  : 'border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600'
+              }`}
+              onClick={() => setForm({ ...form, type: 'company' })}
+            >
+              <Building2 className="h-4 w-4" /> Societa'
+            </button>
+          </div>
+
+          {/* Name */}
+          <div>
+            <label className="block text-xs text-zinc-500 mb-1">Nome *</label>
+            <input
+              type="text"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500"
+              placeholder={form.type === 'person' ? 'es. Andrea Vaturi' : 'es. Kairos SRLS'}
+            />
+          </div>
+
+          {/* Legal form (only for companies) */}
+          {form.type === 'company' && (
+            <div>
+              <label className="block text-xs text-zinc-500 mb-1">Forma Giuridica</label>
+              <input
+                type="text"
+                value={form.legalForm}
+                onChange={(e) => setForm({ ...form, legalForm: e.target.value })}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500"
+                placeholder="es. SRLS, SRL, LTD, SSRL..."
+              />
             </div>
+          )}
 
-            <div className="p-6 space-y-4">
-              {/* Type */}
-              <div className="flex gap-3">
-                <button
-                  className={`flex-1 flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
-                    form.type === 'person'
-                      ? 'border-blue-500 bg-blue-500/10 text-blue-400'
-                      : 'border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600'
-                  }`}
-                  onClick={() => setForm({ ...form, type: 'person', legalForm: '' })}
-                >
-                  <User className="h-4 w-4" /> Persona Fisica
-                </button>
-                <button
-                  className={`flex-1 flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
-                    form.type === 'company'
-                      ? 'border-amber-500 bg-amber-500/10 text-amber-400'
-                      : 'border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600'
-                  }`}
-                  onClick={() => setForm({ ...form, type: 'company' })}
-                >
-                  <Building2 className="h-4 w-4" /> Societa'
-                </button>
-              </div>
-
-              {/* Name */}
-              <div>
-                <label className="block text-xs text-zinc-500 mb-1">Nome *</label>
-                <input
-                  type="text"
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500"
-                  placeholder={form.type === 'person' ? 'es. Andrea Vaturi' : 'es. Kairos SRLS'}
-                />
-              </div>
-
-              {/* Legal form (only for companies) */}
-              {form.type === 'company' && (
-                <div>
-                  <label className="block text-xs text-zinc-500 mb-1">Forma Giuridica</label>
-                  <input
-                    type="text"
-                    value={form.legalForm}
-                    onChange={(e) => setForm({ ...form, legalForm: e.target.value })}
-                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500"
-                    placeholder="es. SRLS, SRL, LTD, SSRL..."
-                  />
-                </div>
-              )}
-
-              {/* Country + Role */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs text-zinc-500 mb-1">
-                    <Globe className="inline h-3 w-3 mr-1" />Paese
-                  </label>
-                  <select
-                    value={form.country}
-                    onChange={(e) => setForm({ ...form, country: e.target.value })}
-                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none"
-                  >
-                    <option value="IT">Italia</option>
-                    <option value="GB">UK</option>
-                    <option value="RO">Romania</option>
-                    <option value="US">USA</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs text-zinc-500 mb-1">
-                    <Users className="inline h-3 w-3 mr-1" />Ruolo
-                  </label>
-                  <select
-                    value={form.role}
-                    onChange={(e) => setForm({ ...form, role: e.target.value as SubjectRole })}
-                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none"
-                  >
-                    <option value="owner">Titolare</option>
-                    <option value="family">Familiare</option>
-                    <option value="partner">Partner</option>
-                    <option value="other">Altro</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Parent subject */}
-              <div>
-                <label className="block text-xs text-zinc-500 mb-1">Soggetto Genitore (opzionale)</label>
-                <select
-                  value={form.parentSubjectId}
-                  onChange={(e) => setForm({ ...form, parentSubjectId: e.target.value })}
-                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none"
-                >
-                  <option value="">— Nessuno —</option>
-                  {subjects
-                    .filter((s) => s.id !== modal.editingItem?.id && s.isActive)
-                    .map((s) => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
-                </select>
-              </div>
-
-              {/* Notes */}
-              <div>
-                <label className="block text-xs text-zinc-500 mb-1">Note</label>
-                <textarea
-                  value={form.notes}
-                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                  rows={2}
-                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500 resize-none"
-                  placeholder="Note aggiuntive..."
-                />
-              </div>
+          {/* Country + Role */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-zinc-500 mb-1">
+                <Globe className="inline h-3 w-3 mr-1" />Paese
+              </label>
+              <select
+                value={form.country}
+                onChange={(e) => setForm({ ...form, country: e.target.value })}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none"
+              >
+                <option value="IT">Italia</option>
+                <option value="GB">UK</option>
+                <option value="RO">Romania</option>
+                <option value="US">USA</option>
+              </select>
             </div>
-
-            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-zinc-800">
-              <button
-                className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-700 transition-colors"
-                onClick={modal.close}
+            <div>
+              <label className="block text-xs text-zinc-500 mb-1">
+                <Users className="inline h-3 w-3 mr-1" />Ruolo
+              </label>
+              <select
+                value={form.role}
+                onChange={(e) => setForm({ ...form, role: e.target.value as SubjectRole })}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none"
               >
-                Annulla
-              </button>
-              <button
-                className="rounded-lg bg-energy-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-energy-400 transition-colors disabled:opacity-50"
-                onClick={handleSave}
-                disabled={!form.name.trim() || createSubject.isPending || updateSubject.isPending}
-              >
-                {(createSubject.isPending || updateSubject.isPending) ? (
-                  <span className="flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Salvataggio...
-                  </span>
-                ) : (
-                  modal.isEditing ? 'Salva Modifiche' : 'Crea Soggetto'
-                )}
-              </button>
+                <option value="owner">Titolare</option>
+                <option value="family">Familiare</option>
+                <option value="partner">Partner</option>
+                <option value="other">Altro</option>
+              </select>
             </div>
           </div>
-        </div>
+
+          {/* Parent subject */}
+          <div>
+            <label className="block text-xs text-zinc-500 mb-1">Soggetto Genitore (opzionale)</label>
+            <select
+              value={form.parentSubjectId}
+              onChange={(e) => setForm({ ...form, parentSubjectId: e.target.value })}
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none"
+            >
+              <option value="">— Nessuno —</option>
+              {subjects
+                .filter((s) => s.id !== modal.editingItem?.id && s.isActive)
+                .map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+            </select>
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label className="block text-xs text-zinc-500 mb-1">Note</label>
+            <textarea
+              value={form.notes}
+              onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              rows={2}
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500 resize-none"
+              placeholder="Note aggiuntive..."
+            />
+          </div>
+        </FormModal>
       )}
     </div>
   )
