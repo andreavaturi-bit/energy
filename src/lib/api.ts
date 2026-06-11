@@ -123,10 +123,22 @@ export interface TransferPayload {
   notes?: string | null
 }
 
+export interface TransactionsSummaryEntry {
+  currency: string
+  income: number
+  expenses: number
+  count: number
+}
+
 export const transactionsApi = {
   list: (params?: Record<string, string>) => {
     const qs = params ? '?' + new URLSearchParams(params).toString() : ''
     return api.get<TransactionListResponse>(`/transactions${qs}`)
+  },
+  /** Somme aggregate server-side su TUTTE le transazioni filtrate */
+  summary: (params?: Record<string, string>) => {
+    const qs = new URLSearchParams({ ...params, summary: '1' }).toString()
+    return api.get<{ byCurrency: TransactionsSummaryEntry[] }>(`/transactions?${qs}`)
   },
   get: (id: string) => api.post<Transaction & { tags?: Tag[] }>(
     '/transactions', { _action: 'get', id }),

@@ -21,16 +21,46 @@ export async function handleTransactions(
       const v = params[k]
       return Array.isArray(v) ? v[0] : v
     }
+
+    // ── GET /transactions?summary=1 — somme aggregate in SQL su TUTTE
+    //    le transazioni filtrate (non solo la pagina caricata) ──
+    if (param('summary')) {
+      const { data, error } = await sb.rpc('transactions_summary', {
+        p_container_id: param('containerId') || null,
+        p_counterparty_id: param('counterpartyId') || null,
+        p_beneficiary_subject_id: param('beneficiarySubjectId') || null,
+        p_type: param('type') || null,
+        p_status: param('status') || null,
+        p_date_from: param('dateFrom') || null,
+        p_date_to: param('dateTo') || null,
+        p_search: param('search') || null,
+        p_tag_id: param('tagId') || null,
+      })
+      if (error) throw error
+      const byCurrency = ((data || []) as Array<{ currency: string; income: number | string; expenses: number | string; tx_count: number }>)
+        .map((r) => ({
+          currency: r.currency,
+          income: Number(r.income) || 0,
+          expenses: Number(r.expenses) || 0,
+          count: Number(r.tx_count) || 0,
+        }))
+      return ok(res, { byCurrency })
+    }
+
     const limit = Math.min(parseInt(param('limit') || '200'), 1000)
     const offset = parseInt(param('offset') || '0')
 
+    // Tag filter via inner join sulla junction table: filtrare scaricando
+    // gli id taggati troncherebbe al limite righe di PostgREST.
+    const tagIdFilter = param('tagId')
+    const baseSelect = '*, containers(name, color, currency), counterparties(name), beneficiarySubject:subjects!transactions_beneficiary_subject_id_fkey(name)'
+    const select = tagIdFilter ? `${baseSelect}, transaction_tags!inner(tag_id)` : baseSelect
+
     let query = sb
       .from('transactions')
-      .select(
-        '*, containers(name, color, currency), counterparties(name), beneficiarySubject:subjects!transactions_beneficiary_subject_id_fkey(name)',
-        { count: 'exact' },
-      )
+      .select(select, { count: 'exact' })
 
+    if (tagIdFilter) query = query.eq('transaction_tags.tag_id', tagIdFilter)
     if (param('containerId')) query = query.eq('container_id', param('containerId')!)
     if (param('counterpartyId')) query = query.eq('counterparty_id', param('counterpartyId')!)
     if (param('beneficiarySubjectId')) query = query.eq('beneficiary_subject_id', param('beneficiarySubjectId')!)
@@ -41,20 +71,6 @@ export async function handleTransactions(
     if (param('search')) {
       const s = param('search')!
       query = query.or(`description.ilike.%${s}%,notes.ilike.%${s}%`)
-    }
-
-    // Tag filter: if tagId is specified, filter transactions that have that tag
-    const tagIdFilter = param('tagId')
-    if (tagIdFilter) {
-      const { data: taggedTxIds } = await sb
-        .from('transaction_tags')
-        .select('transaction_id')
-        .eq('tag_id', tagIdFilter)
-      const txIds = (taggedTxIds || []).map((r: Record<string, unknown>) => r.transaction_id as string)
-      if (txIds.length === 0) {
-        return ok(res, { rows: [], total: 0, limit, offset })
-      }
-      query = query.in('id', txIds)
     }
 
     const { data, error, count } = await query
@@ -96,6 +112,7 @@ export async function handleTransactions(
       delete row.containers
       delete row.counterparties
       delete row.beneficiarySubject
+      delete row.transaction_tags
       return row
     })
 

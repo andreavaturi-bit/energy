@@ -52,23 +52,20 @@ export const handleContainers = createCrudHandler({
     return { canDelete: true }
   },
   listPostProcess: async (sb, rows) => {
-    // Somma transazioni non-cancelled per container_id
-    const { data: txSums } = await sb
-      .from('transactions')
-      .select('container_id, amount')
-      .neq('status', 'cancelled')
+    // Saldi aggregati in SQL (esclude cancelled e parent split):
+    // sommare le righe in JS troncherebbe al limite righe di PostgREST.
+    const { data: balances, error } = await sb.rpc('container_balances')
+    if (error) throw error
 
-    const sumMap = new Map<string, number>()
-    for (const t of (txSums || []) as Array<Record<string, unknown>>) {
-      const cid = t.container_id as string
-      const amt = parseFloat(t.amount as string) || 0
-      sumMap.set(cid, (sumMap.get(cid) || 0) + amt)
+    const balMap = new Map<string, number>()
+    for (const b of (balances || []) as Array<{ container_id: string; balance: number | string }>) {
+      balMap.set(b.container_id, Number(b.balance) || 0)
     }
 
     return rows.map((r) => {
-      const initialBal = parseFloat(r.initial_balance as string) || 0
-      const txSum = sumMap.get(r.id as string) || 0
-      return { ...r, current_balance: (initialBal + txSum).toFixed(4) }
+      const fallback = parseFloat(r.initial_balance as string) || 0
+      const bal = balMap.get(r.id as string) ?? fallback
+      return { ...r, current_balance: bal.toFixed(4) }
     })
   },
 })

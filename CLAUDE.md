@@ -32,6 +32,22 @@
 - Helper di risposta in `api/_lib/supabase.ts`: `ok`, `created`, `badRequest`, `notFound`, `serverError`, `setCors`.
 - DB usa `snake_case`, frontend usa `camelCase` (conversione via `snakeToCamel` da `src/lib/transforms.ts`).
 
+### Calcoli e aggregazioni (saldi, statistiche, riepiloghi)
+
+- **Mai scaricare le transazioni e sommarle in JavaScript** (ne' lato API ne' lato frontend): PostgREST tronca i risultati a `db_max_rows` e le somme diventano sbagliate/incoerenti. Tutte le aggregazioni si fanno in SQL con funzioni RPC Postgres chiamate via `sb.rpc(...)`.
+- Funzioni RPC esistenti (vedi migration `server_side_aggregations`):
+  - `container_balances()` - saldo corrente per contenitore (initial_balance + somma tx attive)
+  - `balances_by_currency()` - patrimonio per valuta (contenitori attivi)
+  - `flows_summary(p_date_from, p_date_to, p_container_id, p_currency, p_only_completed)` - totali entrate/uscite su un periodo
+  - `monthly_flows(...)` - trend mensile entrate/uscite
+  - `tag_breakdown(p_direction, ...)` - ripartizione per tag (tag_id NULL = senza tag)
+  - `transactions_summary(...filtri)` - riepilogo per valuta su tutte le transazioni filtrate (pagina Transazioni)
+  - `pending_totals()` - totali pendenti per valuta
+- Regole di esclusione comuni (gia' dentro le funzioni): `status='cancelled'` e parent con `status='split'` sempre esclusi; i figli dello split (status `completed`) inclusi; trasferimenti (`transfer_in`/`transfer_out`) esclusi da entrate/uscite ma inclusi nei saldi contenitore.
+- **Multi-valuta: mai sommare valute diverse in un unico numero.** Gli endpoint stats che restituiscono un numero unico filtrano per valuta (default `EUR`, override con `?currency=`); i saldi restano separati per valuta.
+- Per i conteggi esatti usare `select('id', { count: 'exact', head: true })` (non risente del limite righe).
+- Sul ruolo `authenticator` e' impostato `pgrst.db_max_rows = '1000000'`: NON e' piu' load-bearing per saldi/statistiche, ma serve ancora ai percorsi che leggono molte righe per elaborarle (es. rilevamento ricorrenze in `recurrences.ts`). Non rimuoverlo senza prima paginare quei percorsi.
+
 ### Frontend hooks (`src/lib/hooks.ts`)
 
 - Tutti i dati vengono da hooks TanStack Query.

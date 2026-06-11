@@ -264,6 +264,15 @@ export function useTransactions(params?: Record<string, string>) {
   })
 }
 
+/** Somme Entrate/Uscite/Netto calcolate in SQL su tutte le transazioni filtrate */
+export function useTransactionsSummary(params?: Record<string, string>) {
+  return useQuery({
+    queryKey: ['transactions', 'summary', params] as const,
+    queryFn: () => transactionsApi.summary(params),
+    placeholderData: keepPreviousData,
+  })
+}
+
 export function useCreateTransaction() {
   const qc = useQueryClient()
   return useMutation({
@@ -272,6 +281,7 @@ export function useCreateTransaction() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['transactions'] })
       qc.invalidateQueries({ queryKey: queryKeys.stats })
+      qc.invalidateQueries({ queryKey: queryKeys.containers })
     },
   })
 }
@@ -284,6 +294,7 @@ export function useUpdateTransaction() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['transactions'] })
       qc.invalidateQueries({ queryKey: queryKeys.stats })
+      qc.invalidateQueries({ queryKey: queryKeys.containers })
     },
   })
 }
@@ -295,6 +306,7 @@ export function useDeleteTransaction() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['transactions'] })
       qc.invalidateQueries({ queryKey: queryKeys.stats })
+      qc.invalidateQueries({ queryKey: queryKeys.containers })
     },
   })
 }

@@ -34,6 +34,7 @@ import { FormModal } from '@/components/ui/FormModal'
 import type { Transaction, TransactionType, TransactionStatus, Container, Counterparty, Subject, Tag } from '@/types'
 import {
   useTransactions,
+  useTransactionsSummary,
   useContainers,
   useCounterparties,
   useSubjects,
@@ -708,6 +709,11 @@ export function Transactions() {
 
   // ── Data hooks ─────────────────────────────────────────────
   const { data: txData, isLoading: txLoading, error: txError } = useTransactions(queryParams)
+  const summaryParams = useMemo(() => {
+    const { limit: _limit, offset: _offset, ...rest } = queryParams
+    return rest
+  }, [queryParams])
+  const { data: summaryData } = useTransactionsSummary(summaryParams)
   const { data: containers = [], isLoading: containersLoading } = useContainers()
   const { data: counterparties = [], isLoading: counterpartiesLoading } = useCounterparties()
   const { data: subjects = [] } = useSubjects()
@@ -837,26 +843,20 @@ export function Transactions() {
     deleteMutation.mutate(id)
   }
 
-  // ── Summary calculations ──────────────────────────────────
+  // ── Summary (aggregato in SQL su TUTTE le transazioni filtrate) ──
   const summary = useMemo(() => {
-    let income = 0
-    let expenses = 0
-
-    for (const tx of transactions) {
-      const amt = parseFloat(tx.amount)
-      if (isNaN(amt)) continue
-      if (amt > 0) income += amt
-      else expenses += amt
-    }
-
+    const entries = summaryData?.byCurrency ?? []
+    const eur = entries.find((e) => e.currency === 'EUR')
+    const others = entries.filter((e) => e.currency !== 'EUR')
     return {
-      income,
-      expenses,
-      net: income + expenses,
-      filteredCount: transactions.length,
+      income: eur?.income ?? 0,
+      expenses: eur?.expenses ?? 0,
+      net: (eur?.income ?? 0) + (eur?.expenses ?? 0),
+      others,
+      loadedCount: transactions.length,
       totalCount,
     }
-  }, [transactions, totalCount])
+  }, [summaryData, transactions.length, totalCount])
 
   // ── Has any active filter ─────────────────────────────────
   const hasFilters =
@@ -1287,12 +1287,22 @@ export function Transactions() {
           <p className="mt-1 text-lg font-semibold text-emerald-400">
             {formatCurrency(summary.income)}
           </p>
+          {summary.others.map((o) => (
+            <p key={o.currency} className="text-xs text-zinc-500">
+              {formatCurrency(o.income, o.currency)}
+            </p>
+          ))}
         </div>
         <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
           <p className="text-xs text-zinc-500">Uscite</p>
           <p className="mt-1 text-lg font-semibold text-red-400">
             {formatCurrency(summary.expenses)}
           </p>
+          {summary.others.map((o) => (
+            <p key={o.currency} className="text-xs text-zinc-500">
+              {formatCurrency(o.expenses, o.currency)}
+            </p>
+          ))}
         </div>
         <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
           <p className="text-xs text-zinc-500">Netto</p>
@@ -1303,15 +1313,20 @@ export function Transactions() {
           >
             {formatCurrency(summary.net)}
           </p>
+          {summary.others.map((o) => (
+            <p key={o.currency} className="text-xs text-zinc-500">
+              {formatCurrency(o.income + o.expenses, o.currency)}
+            </p>
+          ))}
         </div>
         <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
           <p className="text-xs text-zinc-500">Transazioni</p>
           <p className="mt-1 text-lg font-semibold text-zinc-200">
-            {summary.filteredCount}
-            {summary.filteredCount !== summary.totalCount && (
+            {summary.totalCount}
+            {summary.loadedCount < summary.totalCount && (
               <span className="text-sm font-normal text-zinc-500">
                 {' '}
-                / {summary.totalCount}
+                (prime {summary.loadedCount} mostrate)
               </span>
             )}
           </p>
@@ -1437,7 +1452,9 @@ export function Transactions() {
         {/* ── Pagination ───────────────────────────────────── */}
         <div className="flex items-center justify-between border-t border-zinc-800 px-4 py-3">
           <p className="text-sm text-zinc-500">
-            {summary.filteredCount} transazioni
+            {summary.loadedCount < summary.totalCount
+              ? `${summary.loadedCount} di ${summary.totalCount} transazioni caricate`
+              : `${summary.totalCount} transazioni`}
           </p>
           <div className="flex items-center gap-4">
             {/* Page size selector */}

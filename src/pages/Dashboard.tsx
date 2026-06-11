@@ -74,21 +74,30 @@ export function Dashboard() {
       .slice(0, 10)
   })()
 
-  // Type summary
+  // Type summary — totali separati per valuta (mai sommare valute diverse)
   const typeSummary = (() => {
     const activeContainers = containers.filter((c) => c.isActive)
-    const typeMap = new Map<ContainerType, { count: number; total: number }>()
+    const typeMap = new Map<ContainerType, { count: number; byCurrency: Map<string, number> }>()
 
     for (const c of activeContainers) {
-      const entry = typeMap.get(c.type) || { count: 0, total: 0 }
+      const entry = typeMap.get(c.type) || { count: 0, byCurrency: new Map<string, number>() }
       entry.count += 1
-      entry.total += parseFloat(c.currentBalance ?? c.initialBalance ?? '0')
+      const cur = c.currency || 'EUR'
+      const bal = parseFloat(c.currentBalance ?? c.initialBalance ?? '0')
+      entry.byCurrency.set(cur, (entry.byCurrency.get(cur) || 0) + bal)
       typeMap.set(c.type, entry)
     }
 
     return Array.from(typeMap.entries())
-      .map(([type, data]) => ({ type, ...data }))
-      .sort((a, b) => b.total - a.total)
+      .map(([type, data]) => ({
+        type,
+        count: data.count,
+        totalEUR: data.byCurrency.get('EUR') ?? 0,
+        others: [...data.byCurrency.entries()]
+          .filter(([cur, total]) => cur !== 'EUR' && total !== 0)
+          .map(([currency, total]) => ({ currency, total })),
+      }))
+      .sort((a, b) => b.totalEUR - a.totalEUR)
   })()
 
   // Recent transactions from stats
@@ -210,7 +219,7 @@ export function Dashboard() {
             Per Tipologia
           </h2>
           <div className="space-y-2">
-            {typeSummary.map(({ type, count, total }) => {
+            {typeSummary.map(({ type, count, totalEUR, others }) => {
               const Icon = containerTypeIcons[type]
               return (
                 <div
@@ -228,9 +237,16 @@ export function Dashboard() {
                       </p>
                     </div>
                   </div>
-                  <p className="text-sm font-semibold text-zinc-100">
-                    {formatCurrency(total)}
-                  </p>
+                  <div className="text-right">
+                    <p className="text-sm font-semibold text-zinc-100">
+                      {formatCurrency(totalEUR)}
+                    </p>
+                    {others.map((o) => (
+                      <p key={o.currency} className="text-xs text-zinc-500">
+                        {formatCurrency(o.total, o.currency)}
+                      </p>
+                    ))}
+                  </div>
                 </div>
               )
             })}
