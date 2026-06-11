@@ -71,6 +71,7 @@ interface ImportResultData {
   errors: number
   errorMessages?: string[]
   reconciled?: number
+  batchId?: string
 }
 
 interface MatchCandidate {
@@ -598,6 +599,7 @@ export function ImportData() {
 
   // --- Import in progress flag ---
   const [isImporting, setIsImporting] = useState(false)
+  const [isRollingBack, setIsRollingBack] = useState(false)
   const queryClient = useQueryClient()
 
   /** Step 3 -> 4: perform import with reconciliation */
@@ -631,28 +633,34 @@ export function ImportData() {
           })
 
         // For each reconciliation, update the manual transaction with the CSV hash
+        const reconcileErrors: string[] = []
         for (const pair of pairs) {
           if (!pair.hash) continue
           try {
-            await transactionsApi.update(pair.keepId, {
-              externalHash: pair.hash,
-            } as never)
+            await transactionsApi.update(pair.keepId, { externalHash: pair.hash })
             reconciledCount++
-          } catch {
-            // Silently continue if one fails
+          } catch (err) {
+            reconcileErrors.push(err instanceof Error ? err.message : 'Riconciliazione fallita')
           }
+        }
+        if (reconcileErrors.length > 0) {
+          console.warn('Reconcile errors:', reconcileErrors)
         }
       }
 
       // Step B: Import remaining (non-reconciled) transactions
-      let importResult: { inserted: number; failed: number; skippedDuplicates: number; total: number; errors?: string[] } = { inserted: 0, failed: 0, skippedDuplicates: 0, total: 0 }
+      let importResult: { inserted: number; failed: number; skippedDuplicates: number; total: number; batchId?: string; errors?: string[] } = { inserted: 0, failed: 0, skippedDuplicates: 0, total: 0 }
       if (transactions.length > 0) {
-        importResult = await transactionsApi.batchCreate(transactions)
+        importResult = await transactionsApi.batchCreate(transactions, {
+          containerId,
+          filename: preview.filename,
+        })
       }
 
       // Invalidate caches
       queryClient.invalidateQueries({ queryKey: ['transactions'] })
       queryClient.invalidateQueries({ queryKey: ['stats'] })
+      queryClient.invalidateQueries({ queryKey: ['containers'] })
 
       setImportResult({
         imported: importResult.inserted,
@@ -661,6 +669,7 @@ export function ImportData() {
         errors: importResult.failed + preview.errorCount,
         errorMessages: importResult.errors,
         reconciled: reconciledCount,
+        batchId: importResult.batchId,
       })
       setStep(4)
     } catch (err) {
@@ -678,6 +687,27 @@ export function ImportData() {
       setIsImporting(false)
     }
   }, [preview, containerId, isImporting, queryClient, matchCandidates, selectedMatches])
+
+  /** Annulla l'ultimo import eliminando tutte le sue transazioni */
+  const handleRollback = useCallback(async () => {
+    if (!importResult?.batchId || isRollingBack) return
+    if (!confirm(`Annullare l'import? Verranno eliminate le ${importResult.imported} transazioni appena importate.`)) return
+    setIsRollingBack(true)
+    try {
+      await transactionsApi.rollbackBatch(importResult.batchId)
+      queryClient.invalidateQueries({ queryKey: ['transactions'] })
+      queryClient.invalidateQueries({ queryKey: ['stats'] })
+      queryClient.invalidateQueries({ queryKey: ['containers'] })
+      resetWizardRef.current()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Annullamento fallito')
+    } finally {
+      setIsRollingBack(false)
+    }
+  }, [importResult, isRollingBack, queryClient])
+
+  // Ref per evitare dipendenza circolare con resetWizard (definito sotto)
+  const resetWizardRef = useRef<() => void>(() => {})
 
   /** Reset wizard */
   const resetWizard = useCallback(() => {
@@ -703,6 +733,7 @@ export function ImportData() {
     setCustomProfile(p => ({ ...p, separateAmountColumns: false }))
     if (fileInputRef.current) fileInputRef.current.value = ''
   }, [])
+  resetWizardRef.current = resetWizard
 
   // ============================================================
   // VALIDATION
@@ -1472,6 +1503,24 @@ export function ImportData() {
                   {msg}
                 </p>
               ))}
+            </div>
+          )}
+
+          {/* Annulla import */}
+          {importResult.batchId && importResult.imported > 0 && (
+            <div className="mt-6 w-full max-w-lg rounded-lg border border-zinc-700 bg-zinc-800/40 p-4 text-center">
+              <p className="text-xs text-zinc-400">
+                Hai sbagliato contenitore o profilo? Puoi annullare questo import e rimuovere
+                in blocco le {importResult.imported} transazioni appena inserite.
+              </p>
+              <button
+                onClick={handleRollback}
+                disabled={isRollingBack}
+                className="mt-3 inline-flex items-center gap-2 rounded-lg border border-red-500/40 px-4 py-2 text-sm text-red-400 hover:bg-red-500/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {isRollingBack && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                Annulla questo import
+              </button>
             </div>
           )}
 

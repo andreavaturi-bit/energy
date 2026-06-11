@@ -144,10 +144,19 @@ export const transactionsApi = {
     '/transactions', { _action: 'get', id }),
   create: (data: Partial<Transaction> & { tagIds?: string[] }) =>
     api.post<Transaction>('/transactions', data),
-  batchCreate: (transactions: Partial<Transaction>[]) =>
-    api.post<{ inserted: number; failed: number; skippedDuplicates: number; total: number; errors?: string[] }>(
+  batchCreate: (
+    transactions: Partial<Transaction>[],
+    meta?: { containerId?: string; filename?: string; profileId?: string },
+  ) =>
+    api.post<{ inserted: number; failed: number; skippedDuplicates: number; total: number; batchId?: string; errors?: string[] }>(
       '/transactions?action=batch',
-      { transactions },
+      { transactions, ...meta },
+    ),
+  /** Annulla un import eliminando tutte le transazioni del batch */
+  rollbackBatch: (batchId: string) =>
+    api.post<{ rolledBack: boolean; batchId: string; deleted: number }>(
+      '/transactions?action=rollback-batch',
+      { batchId },
     ),
   update: (id: string, data: Partial<Transaction> & { tagIds?: string[] }) =>
     api.post<Transaction>('/transactions', { ...data, _action: 'update', id }),

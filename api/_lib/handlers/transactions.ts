@@ -349,62 +349,106 @@ export async function handleTransactions(
       external_hash: (b.externalHash as string) ?? null,
     }})
 
-    // Dedup server-side: filter out rows whose external_hash already exists
-    const hashesToCheck = rows
-      .map(r => r.external_hash)
-      .filter((h): h is string => h !== null && h !== undefined)
-    let existingHashSet = new Set<string>()
+    // Dedup intra-payload: due righe con lo stesso (container, hash) nello
+    // stesso file verrebbero entrambe rifiutate dall'indice unique nello
+    // stesso INSERT. Tengo la prima occorrenza.
+    const seenInPayload = new Set<string>()
+    const uniqueRows = rows.filter(r => {
+      if (!r.external_hash) return true
+      const key = `${r.container_id}|${r.external_hash}`
+      if (seenInPayload.has(key)) return false
+      seenInPayload.add(key)
+      return true
+    })
 
-    if (hashesToCheck.length > 0) {
-      const containerIds = [...new Set(rows.map(r => r.container_id).filter(Boolean))]
-      for (const cid of containerIds) {
-        const containerHashes = rows
-          .filter(r => r.container_id === cid && r.external_hash)
-          .map(r => r.external_hash as string)
-        if (containerHashes.length === 0) continue
-        for (let i = 0; i < containerHashes.length; i += 500) {
-          const chunk = containerHashes.slice(i, i + 500)
-          const { data } = await sb
-            .from('transactions')
-            .select('external_hash')
-            .eq('container_id', cid)
-            .in('external_hash', chunk)
-          if (data) {
-            data.forEach((r: { external_hash: string }) => existingHashSet.add(r.external_hash))
-          }
+    // Dedup contro il DB: filtra le righe il cui external_hash esiste gia'
+    const existingHashSet = new Set<string>()
+    const containerIds = [...new Set(uniqueRows.map(r => r.container_id).filter(Boolean))]
+    for (const cid of containerIds) {
+      const containerHashes = uniqueRows
+        .filter(r => r.container_id === cid && r.external_hash)
+        .map(r => r.external_hash as string)
+      for (let i = 0; i < containerHashes.length; i += 500) {
+        const chunk = containerHashes.slice(i, i + 500)
+        const { data } = await sb
+          .from('transactions')
+          .select('external_hash')
+          .eq('container_id', cid)
+          .in('external_hash', chunk)
+        if (data) {
+          data.forEach((r: { external_hash: string }) => existingHashSet.add(`${cid}|${r.external_hash}`))
         }
       }
     }
 
-    // Filter out duplicates
-    const dedupedRows = rows.filter(r => {
-      if (r.external_hash && existingHashSet.has(r.external_hash)) return false
+    const dedupedRows = uniqueRows.filter(r => {
+      if (r.external_hash && existingHashSet.has(`${r.container_id}|${r.external_hash}`)) return false
       return true
     })
     const skippedDuplicates = rows.length - dedupedRows.length
 
-    // Insert in chunks to avoid timeouts and payload limits
-    const CHUNK_SIZE = 50
+    // Traccia il batch in import_batches per consentire il rollback.
+    // Un solo container per import (caso del wizard); se misti, uso il primo.
+    const batchContainerId = (req.body?.containerId as string) || dedupedRows[0]?.container_id || containerIds[0]
+    let batchId: string | null = null
+    if (batchContainerId) {
+      const { data: batch } = await sb
+        .from('import_batches')
+        .insert({
+          container_id: batchContainerId,
+          profile_id: (req.body?.profileId as string) ?? null,
+          filename: (req.body?.filename as string) ?? 'import',
+          total_rows: rows.length,
+          duplicate_rows: skippedDuplicates,
+          status: 'processing',
+        })
+        .select('id')
+        .single()
+      batchId = batch?.id ?? null
+    }
+
+    const rowsToInsert = batchId
+      ? dedupedRows.map(r => ({ ...r, import_batch_id: batchId }))
+      : dedupedRows
+
+    // Insert a chunk con upsert ignoreDuplicates: l'indice unique
+    // (container_id, external_hash) rende l'import idempotente anche in caso
+    // di race (doppio click, retry) senza creare duplicati.
+    const CHUNK_SIZE = 200
     let insertedCount = 0
     const errors: string[] = []
 
-    for (let i = 0; i < dedupedRows.length; i += CHUNK_SIZE) {
-      const chunk = dedupedRows.slice(i, i + CHUNK_SIZE)
-      const { error } = await sb
+    for (let i = 0; i < rowsToInsert.length; i += CHUNK_SIZE) {
+      const chunk = rowsToInsert.slice(i, i + CHUNK_SIZE)
+      const { data, error } = await sb
         .from('transactions')
-        .insert(chunk)
+        .upsert(chunk, { onConflict: 'container_id,external_hash', ignoreDuplicates: true })
+        .select('id')
       if (error) {
         errors.push(`Chunk ${Math.floor(i / CHUNK_SIZE) + 1}: ${error.message}`)
       } else {
-        insertedCount += chunk.length
+        insertedCount += data?.length ?? 0
       }
+    }
+
+    // Aggiorna lo stato finale del batch
+    if (batchId) {
+      await sb
+        .from('import_batches')
+        .update({
+          imported_rows: insertedCount,
+          skipped_rows: skippedDuplicates,
+          status: errors.length > 0 ? (insertedCount > 0 ? 'partial' : 'failed') : 'completed',
+          error_log: errors.length > 0 ? errors : null,
+        })
+        .eq('id', batchId)
     }
 
     if (errors.length > 0 && insertedCount === 0 && dedupedRows.length > 0) {
       return res.status(500).json({
         error: 'Import failed',
         message: errors.join('; '),
-        data: { inserted: 0, failed: dedupedRows.length, skippedDuplicates, errors },
+        data: { inserted: 0, failed: dedupedRows.length, skippedDuplicates, errors, batchId },
       })
     }
 
@@ -413,8 +457,35 @@ export async function handleTransactions(
       failed: dedupedRows.length - insertedCount,
       skippedDuplicates,
       total: rows.length,
+      batchId,
       errors: errors.length > 0 ? errors : undefined,
     })
+  }
+
+  // POST /transactions?action=rollback-batch — elimina tutte le transazioni
+  // di un import e marca il batch come annullato
+  if (method === 'POST' && actionParam === 'rollback-batch') {
+    const b = req.body || {}
+    const batchId = b.batchId as string
+    if (!batchId) return badRequest(res, 'batchId è obbligatorio')
+
+    const { count } = await sb
+      .from('transactions')
+      .select('id', { count: 'exact', head: true })
+      .eq('import_batch_id', batchId)
+
+    const { error: delErr } = await sb
+      .from('transactions')
+      .delete()
+      .eq('import_batch_id', batchId)
+    if (delErr) throw delErr
+
+    await sb
+      .from('import_batches')
+      .update({ status: 'rolled_back' })
+      .eq('id', batchId)
+
+    return ok(res, { rolledBack: true, batchId, deleted: count ?? 0 })
   }
 
   // POST transfer — create a linked transfer pair
@@ -692,6 +763,10 @@ export async function handleTransactions(
     if (b.transferLinkedId !== undefined) update.transfer_linked_id = b.transferLinkedId
     if (b.status !== undefined) update.status = b.status
     if (b.beneficiarySubjectId !== undefined) update.beneficiary_subject_id = b.beneficiarySubjectId || null
+    // Campi di dedup: necessari alla riconciliazione (copia dell'hash CSV
+    // sulla transazione manuale tenuta) e prima ignorati silenziosamente.
+    if (b.externalHash !== undefined) update.external_hash = b.externalHash
+    if (b.externalId !== undefined) update.external_id = b.externalId
 
     const { data, error } = await sb
       .from('transactions')
@@ -699,7 +774,15 @@ export async function handleTransactions(
       .eq('id', txId)
       .select()
       .single()
-    if (error || !data) return notFound(res, 'Transazione non trovata')
+    if (error) {
+      // Hash gia' presente nel container (es. la riga CSV e' anche stata
+      // importata): non un 404, ma un conflitto di dedup.
+      if ((error as { code?: string }).code === '23505') {
+        return badRequest(res, 'Esiste già una transazione con questo identificativo di import in questo contenitore')
+      }
+      throw error
+    }
+    if (!data) return notFound(res, 'Transazione non trovata')
 
     const tagIds = b.tagIds as string[] | undefined
     if (tagIds !== undefined) {

@@ -141,6 +141,7 @@ export interface Transaction {
   installmentPlanId?: string | null
   installmentNumber?: number | null
   externalId?: string | null
+  externalHash?: string | null
   createdAt: string
   updatedAt: string
   // Joined

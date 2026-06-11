@@ -325,55 +325,57 @@ export function detectProfile(columns: string[]): typeof PRESET_PROFILES[number]
 // ============================================================
 
 /**
- * Converte una data dal formato del CSV a YYYY-MM-DD
+ * Verifica che anno/mese/giorno formino una data di calendario reale
+ * (scarta 31/02, 31/04, 29/02 in anni non bisestili, ecc.) e la
+ * restituisce come YYYY-MM-DD. Ritorna null se la data non esiste.
+ */
+function buildValidDate(yy: string, mm: string, dd: string): string | null {
+  const y = parseInt(yy.padStart(4, '20'), 10)
+  const m = parseInt(mm, 10)
+  const d = parseInt(dd, 10)
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null
+  if (m < 1 || m > 12 || d < 1 || d > 31) return null
+  // Round-trip: costruisco la data e verifico che i componenti non siano
+  // stati normalizzati (es. 31 aprile -> 1 maggio).
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) {
+    return null
+  }
+  return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+}
+
+/**
+ * Converte una data dal formato del CSV a YYYY-MM-DD.
+ * Ritorna null per date inesistenti: meglio una riga in errore visibile
+ * in anteprima che un intero chunk di 50 righe rifiutato da Postgres.
  */
 export function parseDate(value: string, format: string): string | null {
   if (!value) return null
   const v = value.trim()
 
   try {
-    let mm: string, dd: string, yy: string
-
     switch (format) {
       case 'DD/MM/YYYY':
       case 'DD-MM-YYYY': {
         const parts = v.split(/[/\-.]/)
         if (parts.length < 3) return null
-        ;[dd, mm, yy] = parts
-        break
+        return buildValidDate(parts[2], parts[1], parts[0])
       }
       case 'MM/DD/YYYY': {
         const parts = v.split(/[/\-.]/)
         if (parts.length < 3) return null
-        ;[mm, dd, yy] = parts
-        break
+        return buildValidDate(parts[2], parts[0], parts[1])
       }
       case 'YYYY-MM-DD': {
         // Potrebbe avere timestamp: "2024-01-15 10:30:00"
         const datePart = v.split(/[T\s]/)[0]
-        if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) return datePart
-        return null
+        const m = datePart.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+        if (!m) return null
+        return buildValidDate(m[1], m[2], m[3])
       }
       default:
         return null
     }
-
-    const month = parseInt(mm, 10)
-    const day = parseInt(dd, 10)
-
-    // Auto-correct swapped month/day: if month > 12 but day <= 12, swap them
-    if (month > 12 && day >= 1 && day <= 12) {
-      const tmp = mm
-      mm = dd
-      dd = tmp
-    }
-
-    // Validate
-    const m = parseInt(mm, 10)
-    const d = parseInt(dd, 10)
-    if (m < 1 || m > 12 || d < 1 || d > 31) return null
-
-    return `${yy.padStart(4, '20')}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`
   } catch {
     return null
   }
@@ -392,11 +394,30 @@ export function parseAmount(
   thousandsSeparator = '.',
   inverted = false,
 ): number | null {
-  if (!value) return null
-  let v = value.trim()
+  if (value === null || value === undefined) return null
+  let v = String(value).trim()
+  if (v === '') return null
 
-  // Rimuovi simboli valuta e spazi
+  // Rimuovi simboli valuta, spazi e suffissi comuni (CR/DR/EUR/€)
   v = v.replace(/[€$£¥\s]/g, '')
+  v = v.replace(/(CR|DR|EUR|USD|GBP)$/i, '')
+
+  // Segno: gestisci esplicitamente sia il segno iniziale sia quello posposto
+  // (alcuni gestionali scrivono "12,50-" per le uscite). parseFloat lo
+  // ignorerebbe silenziosamente trasformando un'uscita in entrata.
+  let sign = 1
+  if (/^[-+]/.test(v)) {
+    if (v[0] === '-') sign = -1
+    v = v.slice(1)
+  } else if (/[-+]$/.test(v)) {
+    if (v.endsWith('-')) sign = -1
+    v = v.slice(0, -1)
+  }
+  // Parentesi contabili: (12,50) = -12,50
+  if (/^\(.*\)$/.test(v)) {
+    sign = -1
+    v = v.slice(1, -1)
+  }
 
   // Rimuovi separatore migliaia
   if (thousandsSeparator === '.') {
@@ -410,10 +431,15 @@ export function parseAmount(
     v = v.replace(',', '.')
   }
 
-  const num = parseFloat(v)
-  if (isNaN(num)) return null
+  // Dopo la normalizzazione deve restare solo un numero ben formato:
+  // qualsiasi carattere residuo (es. separatori mal configurati) e' un errore,
+  // non un valore da accettare a caso come fa parseFloat.
+  if (!/^\d+(\.\d+)?$/.test(v)) return null
 
-  return inverted ? -num : num
+  const num = parseFloat(v)
+  if (!Number.isFinite(num)) return null
+
+  return inverted ? -sign * num : sign * num
 }
 
 // ============================================================
@@ -421,24 +447,38 @@ export function parseAmount(
 // ============================================================
 
 /**
- * Genera un hash semplice per deduplicazione
+ * Normalizza una descrizione per l'hash: trim + whitespace collassato a
+ * singolo spazio. NIENTE case/accent folding, deve restare byte-identica
+ * alla normalizzazione SQL `trim(regexp_replace(d,'\s+',' ','g'))`.
  */
-export function generateRowHash(row: Record<string, string>, dedupColumns: string[]): string {
-  const cols = dedupColumns.length > 0
-    ? dedupColumns
-    : Object.keys(row)
+export function normalizeDescription(desc: string): string {
+  return (desc || '').trim().replace(/\s+/g, ' ')
+}
 
-  const values = cols
-    .map(col => (row[col] || '').trim().toLowerCase())
-    .join('|')
+/**
+ * Costruisce la stringa canonica per l'hash di dedup. DEVE produrre gli
+ * stessi byte della funzione SQL `canonical_tx_hash` (vedi migration
+ * import_canonical_hash): date | amount(2dp con segno) | normdesc | occorrenza.
+ */
+export function canonicalString(
+  date: string,
+  amount: number,
+  description: string,
+  occurrence: number,
+): string {
+  return `${date}|${amount.toFixed(2)}|${normalizeDescription(description)}|${occurrence}`
+}
 
-  // Simple hash (djb2)
-  let hash = 5381
-  for (let i = 0; i < values.length; i++) {
-    hash = ((hash << 5) + hash) + values.charCodeAt(i)
-    hash = hash & hash // Convert to 32-bit int
-  }
-  return Math.abs(hash).toString(36)
+/**
+ * SHA-256 esadecimale di una stringa (UTF-8) via WebCrypto.
+ * Parita' verificata con `encode(digest(...,'sha256'),'hex')` di Postgres.
+ */
+export async function sha256Hex(input: string): Promise<string> {
+  const bytes = new TextEncoder().encode(input)
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return Array.from(new Uint8Array(digest))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('')
 }
 
 // ============================================================
@@ -461,10 +501,21 @@ export async function processCSVImport(
     profile.skipRows,
   )
 
-  // 2. Processa ogni riga
-  const parsedRows: ParsedRow[] = data.map((row, index) => {
-    const mapping = profile.columnMapping as Record<string, string>
+  // 2. Primo passaggio: parsing e validazione di ogni riga (sincrono)
+  const mapping = profile.columnMapping as Record<string, string>
+  type Pre = {
+    row: Record<string, string>
+    index: number
+    date: string | null
+    description: string
+    amount: number | null
+    currency: string
+    valueDate?: string
+    externalId?: string
+    errors: string[]
+  }
 
+  const pre: Pre[] = data.map((row, index) => {
     // Parse date
     const dateRaw = mapping.date ? row[mapping.date] : ''
     const date = parseDate(dateRaw, profile.dateFormat)
@@ -475,13 +526,15 @@ export async function processCSVImport(
     // Parse amount
     let amount: number | null = null
     if (profile.separateAmountColumns && profile.incomeColumn && profile.expenseColumn) {
-      const incomeVal = row[profile.incomeColumn]
-      const expenseVal = row[profile.expenseColumn]
-      const income = parseAmount(incomeVal, profile.decimalSeparator, profile.thousandsSeparator)
-      const expense = parseAmount(expenseVal, profile.decimalSeparator, profile.thousandsSeparator)
-      if (income && income > 0) amount = income
-      else if (expense && expense > 0) amount = -expense
-      else amount = income || expense
+      const income = parseAmount(row[profile.incomeColumn], profile.decimalSeparator, profile.thousandsSeparator)
+      const expense = parseAmount(row[profile.expenseColumn], profile.decimalSeparator, profile.thousandsSeparator)
+      // Distinguo esplicitamente null (cella vuota/non valida) da 0:
+      // un accredito a 0 e' legittimo, non un errore.
+      if (income !== null && income !== 0) amount = Math.abs(income)
+      else if (expense !== null && expense !== 0) amount = -Math.abs(expense)
+      else if (income !== null) amount = income
+      else if (expense !== null) amount = expense === 0 ? 0 : -Math.abs(expense)
+      else amount = null
     } else {
       const amountRaw = mapping.amount ? row[mapping.amount] : ''
       amount = parseAmount(amountRaw, profile.decimalSeparator, profile.thousandsSeparator, profile.amountInverted)
@@ -498,39 +551,50 @@ export async function processCSVImport(
       ? (row[mapping.externalId] || '').trim() || undefined
       : undefined
 
-    // Generate hash
-    const hash = generateRowHash(row, profile.dedupColumns || [])
-
-    // Validate
     const errors: string[] = []
     if (!date) errors.push(`Data non valida: "${dateRaw}"`)
     if (amount === null) errors.push(`Importo non valido: "${mapping.amount ? row[mapping.amount] : ''}"`)
     if (!description) errors.push('Descrizione mancante')
 
-    // Check dedup
-    const isDuplicate = existingHashes.has(hash)
+    return { row, index, date, description, amount, currency, valueDate, externalId, errors }
+  })
 
+  // 3. Calcola l'indice di occorrenza per (data, importo, descrizione normalizzata)
+  //    sulle righe valide del file, per non perdere i twin legittimi.
+  const occCounter = new Map<string, number>()
+
+  // 4. Secondo passaggio: hash canonico (async) e stato finale
+  const parsedRows: ParsedRow[] = await Promise.all(pre.map(async (p): Promise<ParsedRow> => {
+    let hash = ''
+    if (p.errors.length === 0 && p.date && p.amount !== null) {
+      const key = `${p.date}|${p.amount.toFixed(2)}|${normalizeDescription(p.description)}`
+      const occurrence = occCounter.get(key) ?? 0
+      occCounter.set(key, occurrence + 1)
+      hash = await sha256Hex(canonicalString(p.date, p.amount, p.description, occurrence))
+    }
+
+    const isDuplicate = hash !== '' && existingHashes.has(hash)
     const status: ParsedRow['status'] =
-      errors.length > 0 ? 'error' :
+      p.errors.length > 0 ? 'error' :
       isDuplicate ? 'duplicate' :
       'ready'
 
     return {
-      raw: row,
+      raw: p.row,
       mapped: {
-        date: date || '1970-01-01',
-        description,
-        amount: amount || 0,
-        currency,
-        valueDate,
-        externalId,
+        date: p.date || '1970-01-01',
+        description: p.description,
+        amount: p.amount ?? 0,
+        currency: p.currency,
+        valueDate: p.valueDate,
+        externalId: p.externalId,
       },
-      rowIndex: index,
+      rowIndex: p.index,
       hash,
       status,
-      error: errors.length > 0 ? errors.join('; ') : undefined,
+      error: p.errors.length > 0 ? p.errors.join('; ') : undefined,
     }
-  })
+  }))
 
   return {
     filename: file.name,
