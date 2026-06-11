@@ -220,10 +220,11 @@ export async function handleStats(
     }),
     // 3) Transazioni pendenti per valuta (SQL-side)
     sb.rpc('pending_totals'),
-    // 4) Ultime 10 transazioni
+    // 4) Ultime 10 transazioni (escluse annullate e i parent split)
     sb
       .from('transactions')
       .select('*, containers(name, color)')
+      .not('status', 'in', '("cancelled","split")')
       .order('date', { ascending: false })
       .order('created_at', { ascending: false })
       .limit(10),

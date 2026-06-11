@@ -29,6 +29,7 @@ export async function handleRecurrences(
       .from('transactions')
       .select('id, date, description, amount, currency, type, container_id, counterparty_id, source')
       .neq('status', 'cancelled')
+      .neq('status', 'split')
       .neq('type', 'transfer_in')
       .neq('type', 'transfer_out')
       .order('date', { ascending: true })
