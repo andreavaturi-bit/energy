@@ -182,6 +182,7 @@ export function Subjects() {
       alert('Impossibile eliminare: il soggetto ha contenitori associati.')
       return
     }
+    if (!confirm(`Eliminare il soggetto "${subject.name}"?`)) return
     deleteSubject.mutate(subject.id)
     setMenuOpen(null)
   }

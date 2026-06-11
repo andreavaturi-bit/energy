@@ -80,6 +80,15 @@ const NOTION_ACTIVITIES = [
 export async function handleSeed(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return badRequest(res, 'Use POST to seed data')
 
+  // Endpoint distruttivo (cancella tag e controparti non collegati): protetto
+  // da un secret. Senza SEED_SECRET configurato e' inerte, cosi' non e'
+  // sfruttabile da chi conosce solo l'URL pubblico.
+  const secret = process.env.SEED_SECRET
+  const provided = (req.body as Record<string, unknown> | undefined)?.secret
+  if (!secret || provided !== secret) {
+    return res.status(403).json({ error: 'Forbidden', message: 'Seed disabilitato' })
+  }
+
   const sb = getSupabase()
   const results: string[] = []
 

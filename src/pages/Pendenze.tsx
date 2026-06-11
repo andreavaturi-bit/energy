@@ -505,9 +505,13 @@ function AddPendingModal({
 
   function handleSave() {
     if (!form.description || !form.amount || !form.dueDate || !form.containerId) return
+    // Convenzione di segno: entrate (crediti) positive, uscite (debiti)
+    // negative. Senza il segno un debito pagato AUMENTEREBBE il saldo.
+    const magnitude = Math.abs(parseFloat(form.amount))
+    const signed = type === 'credit' ? magnitude : -magnitude
     onSave({
       description: form.description,
-      amount: parseFloat(form.amount),
+      amount: signed,
       dueDate: form.dueDate,
       containerId: form.containerId,
       type: (type === 'credit' ? 'income' : 'expense') as TransactionType,

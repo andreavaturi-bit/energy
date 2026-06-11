@@ -30,8 +30,9 @@ import {
   useUpdateRecurrence,
   useDeleteRecurrence,
 } from '@/lib/hooks'
+import { useQueryClient } from '@tanstack/react-query'
 import { recurrencesApi, type DetectedPattern } from '@/lib/api'
-import { formatCurrency, cn } from '@/lib/utils'
+import { formatCurrency, cn, todayLocal } from '@/lib/utils'
 import type { Frequency, TransactionType, Recurrence } from '@/types'
 
 const frequencyLabels: Record<Frequency, string> = {
@@ -140,6 +141,7 @@ export function Recurrences() {
   }
 
   function handleDelete(id: string) {
+    if (!confirm('Eliminare questa ricorrenza?')) return
     deleteRecurrence.mutate(id)
   }
 
@@ -446,6 +448,7 @@ export function Recurrences() {
 
 function DetectRecurrencesWizard({ onClose }: { onClose: () => void }) {
   const { data: containers = [] } = useContainers()
+  const qc = useQueryClient()
   const [isDetecting, setIsDetecting] = useState(false)
   const [patterns, setPatterns] = useState<DetectedPattern[]>([])
   const [selectedPatterns, setSelectedPatterns] = useState<Set<number>>(new Set())
@@ -462,11 +465,13 @@ function DetectRecurrencesWizard({ onClose }: { onClose: () => void }) {
       if (containerId) params.containerId = containerId
       const result = await recurrencesApi.detect(params as never)
       setPatterns(result.patterns)
-      // Auto-select patterns above threshold
+      // Auto-select patterns above threshold (indici sulla lista COMPLETA,
+      // non sulla filtrata, altrimenti selezionerebbe pattern sbagliati)
       setSelectedPatterns(new Set(
         result.patterns
-          .filter(p => p.confidence >= minConfidence)
-          .map((_, i) => i)
+          .map((p, i) => ({ p, i }))
+          .filter(x => x.p.confidence >= minConfidence)
+          .map(x => x.i)
       ))
       setHasDetected(true)
     } catch (err) {
@@ -492,17 +497,19 @@ function DetectRecurrencesWizard({ onClose }: { onClose: () => void }) {
         containerId: p.containerId,
         counterpartyId: p.counterpartyId,
         type: p.type,
-        startDate: new Date().toISOString().slice(0, 10),
+        startDate: todayLocal(),
         transactionIds: p.transactionIds,
       }))
       const result = await recurrencesApi.createBatch(recurrences)
+      qc.invalidateQueries({ queryKey: ['recurrences'] })
+      qc.invalidateQueries({ queryKey: ['transactions'] })
       setCreateResult({ created: result.created })
     } catch (err) {
       console.error('Creation failed:', err)
     } finally {
       setIsCreating(false)
     }
-  }, [selectedPatterns, patterns])
+  }, [selectedPatterns, patterns, qc])
 
   const filteredPatterns = patterns.filter(p => p.confidence >= minConfidence)
 
@@ -773,7 +780,7 @@ function RecurrenceModal({
     containerId: recurrence?.containerId || '',
     counterpartyId: recurrence?.counterpartyId || '',
     type: (recurrence?.type || 'expense') as TransactionType,
-    startDate: recurrence?.startDate || new Date().toISOString().split('T')[0],
+    startDate: recurrence?.startDate || todayLocal(),
     endDate: recurrence?.endDate || '',
     reminderDaysBefore: recurrence?.reminderDaysBefore,
   })

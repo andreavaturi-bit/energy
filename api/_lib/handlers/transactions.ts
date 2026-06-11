@@ -69,8 +69,11 @@ export async function handleTransactions(
     if (param('dateFrom')) query = query.gte('date', param('dateFrom')!)
     if (param('dateTo')) query = query.lte('date', param('dateTo')!)
     if (param('search')) {
-      const s = param('search')!
-      query = query.or(`description.ilike.%${s}%,notes.ilike.%${s}%`)
+      // I valori vanno racchiusi tra virgolette: senza, virgole e parentesi
+      // nel testo cercato verrebbero interpretate come sintassi del filtro
+      // PostgREST (injection). Rimuovo solo virgolette e backslash dal valore.
+      const s = param('search')!.replace(/["\\]/g, '')
+      query = query.or(`description.ilike."%${s}%",notes.ilike."%${s}%"`)
     }
 
     const { data, error, count } = await query

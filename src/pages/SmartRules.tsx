@@ -299,10 +299,10 @@ function RuleRow({
 }) {
   const tag = tags.find(t => t.id === rule.assignTagId) || rule.assignTag
   const cpName = rule.counterpartyId
-    ? (counterparties.find(c => c.id === rule.counterpartyId)?.name || (rule as unknown as Record<string, unknown>).counterpartyName || '—')
+    ? (counterparties.find(c => c.id === rule.counterpartyId)?.name || (rule as unknown as Record<string, unknown>).counterpartyName || '-')
     : null
   const ctName = rule.containerId
-    ? (containers.find(c => c.id === rule.containerId)?.name || (rule as unknown as Record<string, unknown>).containerName || '—')
+    ? (containers.find(c => c.id === rule.containerId)?.name || (rule as unknown as Record<string, unknown>).containerName || '-')
     : null
 
   return (

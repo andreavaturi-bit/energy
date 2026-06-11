@@ -28,18 +28,35 @@ function formatItalian(num: number): string {
 
 export function formatCurrency(amount: number | string, currency = 'EUR'): string {
   const num = typeof amount === 'string' ? parseFloat(amount) : amount
-  if (isNaN(num)) return '—'
+  if (isNaN(num)) return '-'
   const symbol = currencySymbols[currency] || currency
   return `${formatItalian(num)} ${symbol}`
 }
 
 export function formatAmount(amount: number | string): string {
   const num = typeof amount === 'string' ? parseFloat(amount) : amount
-  if (isNaN(num)) return '—'
+  if (isNaN(num)) return '-'
   return formatItalian(num)
 }
 
 // --- Date formatting ---
+
+/**
+ * Data odierna in fuso LOCALE come YYYY-MM-DD.
+ * NON usare new Date().toISOString().slice(0,10): converte in UTC e tra
+ * mezzanotte e le ~2 di notte in Italia restituisce il giorno precedente.
+ */
+export function todayLocal(): string {
+  return toLocalDateStr(new Date())
+}
+
+/** Converte un Date in YYYY-MM-DD usando i componenti LOCALI (non UTC). */
+export function toLocalDateStr(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
 
 export function formatDate(date: string | Date, fmt = 'dd/MM/yyyy'): string {
   const d = typeof date === 'string' ? parseISO(date) : date

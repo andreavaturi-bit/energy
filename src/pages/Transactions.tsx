@@ -54,6 +54,7 @@ import {
   transactionTypeLabel,
   transactionTypeColor,
   isInflow,
+  todayLocal,
 } from '@/lib/utils'
 
 // ── Status badge styling ────────────────────────────────────
@@ -85,7 +86,7 @@ function typeBadgeBg(type: TransactionType): string {
 // ── Truncate helper ─────────────────────────────────────────
 
 function truncate(str: string | null | undefined, max: number): string {
-  if (!str) return '—'
+  if (!str) return '-'
   return str.length > max ? str.slice(0, max) + '...' : str
 }
 
@@ -184,7 +185,7 @@ function TransactionModal({
   }
 
   const [form, setForm] = useState({
-    date: prefill && !existing ? new Date().toISOString().slice(0, 10) : (src?.date ?? new Date().toISOString().slice(0, 10)),
+    date: prefill && !existing ? todayLocal() : (src?.date ?? todayLocal()),
     description: src?.description ?? '',
     amount: src ? String(Math.abs(parseFloat(src.amount))) : '',
     currency: src?.currency ?? 'EUR',
@@ -750,7 +751,7 @@ export function Transactions() {
 
   // ── Lookup helpers ─────────────────────────────────────────
   const containerName = useCallback(
-    (id: string): string => containers.find((c) => c.id === id)?.name ?? '—',
+    (id: string): string => containers.find((c) => c.id === id)?.name ?? '-',
     [containers],
   )
 
@@ -761,8 +762,8 @@ export function Transactions() {
 
   const counterpartyName = useCallback(
     (id: string | null | undefined): string => {
-      if (!id) return '—'
-      return counterparties.find((c) => c.id === id)?.name ?? '—'
+      if (!id) return '-'
+      return counterparties.find((c) => c.id === id)?.name ?? '-'
     },
     [counterparties],
   )
@@ -786,6 +787,7 @@ export function Transactions() {
         })
         queryClient.invalidateQueries({ queryKey: ['transactions'] })
         queryClient.invalidateQueries({ queryKey: ['stats'] })
+        queryClient.invalidateQueries({ queryKey: ['containers'] })
         setShowCreate(false)
         setDuplicatingTx(null)
       } catch (err) {
@@ -820,6 +822,7 @@ export function Transactions() {
         })
         queryClient.invalidateQueries({ queryKey: ['transactions'] })
         queryClient.invalidateQueries({ queryKey: ['stats'] })
+        queryClient.invalidateQueries({ queryKey: ['containers'] })
         setEditingTx(null)
       } catch (err) {
         setTransferError(err instanceof Error ? err.message : 'Errore nel salvataggio')

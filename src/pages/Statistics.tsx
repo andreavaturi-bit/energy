@@ -13,7 +13,7 @@ import { statsApi, type TagBreakdownItem, type MonthlyTrendItem, type BurningRat
 import { useContainers } from '@/lib/hooks'
 import { SearchableSelect } from '@/components/ui/SearchableSelect'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, toLocalDateStr } from '@/lib/utils'
 
 const monthLabels: Record<string, string> = {
   '01': 'Gen', '02': 'Feb', '03': 'Mar', '04': 'Apr',
@@ -35,57 +35,45 @@ function formatMonthShort(ym: string): string {
 
 function getPresetDates(preset: string): { from: string; to: string } {
   const now = new Date()
-  const today = now.toISOString().slice(0, 10)
+  const today = toLocalDateStr(now)
+  const d = (y: number, m: number, day: number) => toLocalDateStr(new Date(y, m, day))
 
   switch (preset) {
-    case 'this-month': {
-      const from = new Date(now.getFullYear(), now.getMonth(), 1)
-      return { from: from.toISOString().slice(0, 10), to: today }
-    }
-    case 'last-month': {
-      const from = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-      const to = new Date(now.getFullYear(), now.getMonth(), 0)
-      return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) }
-    }
+    case 'this-month':
+      return { from: d(now.getFullYear(), now.getMonth(), 1), to: today }
+    case 'last-month':
+      return {
+        from: d(now.getFullYear(), now.getMonth() - 1, 1),
+        to: d(now.getFullYear(), now.getMonth(), 0),
+      }
     case 'this-quarter': {
       const q = Math.floor(now.getMonth() / 3) * 3
-      const from = new Date(now.getFullYear(), q, 1)
-      return { from: from.toISOString().slice(0, 10), to: today }
+      return { from: d(now.getFullYear(), q, 1), to: today }
     }
     case 'last-quarter': {
       const q = Math.floor(now.getMonth() / 3) * 3
-      const from = new Date(now.getFullYear(), q - 3, 1)
-      const to = new Date(now.getFullYear(), q, 0)
-      return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) }
+      return {
+        from: d(now.getFullYear(), q - 3, 1),
+        to: d(now.getFullYear(), q, 0),
+      }
     }
-    case '3m': {
-      const from = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate())
-      return { from: from.toISOString().slice(0, 10), to: today }
-    }
-    case '6m': {
-      const from = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate())
-      return { from: from.toISOString().slice(0, 10), to: today }
-    }
-    case 'this-year': {
-      const from = new Date(now.getFullYear(), 0, 1)
-      return { from: from.toISOString().slice(0, 10), to: today }
-    }
-    case 'last-year': {
-      const from = new Date(now.getFullYear() - 1, 0, 1)
-      const to = new Date(now.getFullYear() - 1, 11, 31)
-      return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) }
-    }
-    case '2y': {
-      const from = new Date(now.getFullYear() - 2, now.getMonth(), now.getDate())
-      return { from: from.toISOString().slice(0, 10), to: today }
-    }
-    case 'all': {
+    case '3m':
+      return { from: d(now.getFullYear(), now.getMonth() - 3, now.getDate()), to: today }
+    case '6m':
+      return { from: d(now.getFullYear(), now.getMonth() - 6, now.getDate()), to: today }
+    case 'this-year':
+      return { from: d(now.getFullYear(), 0, 1), to: today }
+    case 'last-year':
+      return {
+        from: d(now.getFullYear() - 1, 0, 1),
+        to: d(now.getFullYear() - 1, 11, 31),
+      }
+    case '2y':
+      return { from: d(now.getFullYear() - 2, now.getMonth(), now.getDate()), to: today }
+    case 'all':
       return { from: '2000-01-01', to: today }
-    }
-    default: { // 1y
-      const from = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate())
-      return { from: from.toISOString().slice(0, 10), to: today }
-    }
+    default: // 1y
+      return { from: d(now.getFullYear() - 1, now.getMonth(), now.getDate()), to: today }
   }
 }
 
@@ -137,6 +125,7 @@ export function Statistics() {
 
   // Fetch tag breakdown
   useEffect(() => {
+    let ignore = false
     setLoadingBreakdown(true)
     setErrors([])
     statsApi.getByTag({
@@ -145,47 +134,58 @@ export function Statistics() {
       containerId: containerId || undefined,
       direction,
     }).then(data => {
+      if (ignore) return
       setBreakdown(data.breakdown || [])
       setGrandTotal(data.grandTotal || 0)
       setTxCount(data.transactionCount || 0)
     }).catch((err) => {
+      if (ignore) return
       console.error('Stats by-tag error:', err)
       setErrors(prev => [...prev, `Breakdown: ${err.message}`])
       setBreakdown([])
       setGrandTotal(0)
       setTxCount(0)
-    }).finally(() => setLoadingBreakdown(false))
+    }).finally(() => { if (!ignore) setLoadingBreakdown(false) })
+    return () => { ignore = true }
   }, [dateFrom, dateTo, containerId, direction])
 
   // Fetch monthly trend
   useEffect(() => {
+    let ignore = false
     setLoadingTrend(true)
     statsApi.getMonthlyTrend({
       dateFrom,
       dateTo,
       containerId: containerId || undefined,
     }).then(data => {
+      if (ignore) return
       setTrend(data.trend || [])
     }).catch((err) => {
+      if (ignore) return
       console.error('Stats monthly-trend error:', err)
       setErrors(prev => [...prev, `Trend: ${err.message}`])
       setTrend([])
     })
-    .finally(() => setLoadingTrend(false))
+    .finally(() => { if (!ignore) setLoadingTrend(false) })
+    return () => { ignore = true }
   }, [dateFrom, dateTo, containerId])
 
   // Fetch burning rate
   useEffect(() => {
+    let ignore = false
     setLoadingBurning(true)
     const days = Math.max(1, Math.ceil((new Date(dateTo).getTime() - new Date(dateFrom).getTime()) / (24 * 60 * 60 * 1000)))
     statsApi.getBurningRate({ days }).then(data => {
+      if (ignore) return
       setBurning(data)
     }).catch((err) => {
+      if (ignore) return
       console.error('Stats burning-rate error:', err)
       setErrors(prev => [...prev, `Burning rate: ${err.message}`])
       setBurning(null)
     })
-    .finally(() => setLoadingBurning(false))
+    .finally(() => { if (!ignore) setLoadingBurning(false) })
+    return () => { ignore = true }
   }, [dateFrom, dateTo])
 
   // Trend totals
@@ -282,7 +282,7 @@ export function Statistics() {
               onChange={e => { setDateFrom(e.target.value); setPreset('') }}
               className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-300 focus:border-energy-500 focus:outline-none focus:ring-1 focus:ring-energy-500 [color-scheme:dark]"
             />
-            <span className="text-xs text-zinc-500">—</span>
+            <span className="text-xs text-zinc-500">-</span>
             <input
               type="date"
               value={dateTo}
